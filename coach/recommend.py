@@ -22,6 +22,9 @@ SYSTEM = """Eres un entrenador de running experto y prudente. Preparas al usuari
 Recibes JSON con: objetivo y semanas restantes, contexto del usuario (plan/historial de otro proyecto), registro
 reciente, metricas diarias de Garmin (HRV, sueno, readiness, carga, FC reposo, Body Battery), actividades recientes,
 volumen semanal, el plan de Garmin Coach (info, y entrenos de los ultimos 10 dias con su estado de cumplimiento y de los proximos 14) y predicciones de carrera.
+PRIORIDAD: el contexto del usuario (zonas, FC maxima, reglas, lesiones, plantilla semanal) manda sobre los datos y zonas
+de Garmin; si dice que Garmin sobreestima zonas/FC/VO2max, usa SUS zonas por FC y trata esos valores de Garmin solo como
+referencia. Las molestias o lesiones recientes (contexto, registro, notas) condicionan todo: ante duda, recorta y dilo.
 Reglas: progresion de carga segura (no subir el volumen semanal mas de ~10%), semana de descarga cada 3-4 semanas,
 afinar hacia la carrera (fases base/desarrollo/especifica/taper segun semanas restantes). Si HRV baja, sueno malo o
 readiness bajo, recorta o descansa. Contrasta SIEMPRE el entreno de hoy con el que Garmin Coach tiene programado.
@@ -38,6 +41,7 @@ Responde SOLO con un JSON (en espanol) con esta forma exacta:
    "sueno": {"estado","texto"}, "hrv": {"estado","texto"}, "carga": {"estado","texto"},
    "progreso_objetivo": {"estado","texto"}, "semana": {"estado","texto"},
    "riesgos": ["..."], "recomendaciones": ["..."]},
+ "preguntas": ["datos que te faltan y cambiarian la recomendacion (lesiones, fisio, sesiones sin registrar, fechas de hitos)"],
  "log_entry": "una frase para el registro del dia"
 }
 Cada "texto" con cifras concretas de los datos (valores, comparacion con tu media, tendencia). Si falta un dato, dilo."""
@@ -108,6 +112,8 @@ def build_prompt(db) -> str:
         "objetivo": {"nombre": st["goal_name"], "fecha": st["goal_date"], "semanas_restantes": weeks_left,
                      "dias_entreno_por_semana": st["days_week"] or "no indicado"},
         "contexto_usuario": st["context"][:12000],
+        "hitos_intermedios": st["milestones"][:1500],
+        "historial_previo": st["history"][:14000],
         "registro_reciente": log,
         "metricas_diarias": metrics,
         "actividades_recientes": acts[-30:],

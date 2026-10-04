@@ -151,6 +151,7 @@ function hoy() {
     <div class="card"><div class="muted">Sueño</div><div class="big">${num(m.sleep_h, 1)} h</div><div class="muted">puntuación ${num(m.sleep_score)}</div></div>
     <div class="card"><div class="muted">Body Battery</div><div class="big">${num(m.bb_high)}</div><div class="muted">mín ${num(m.bb_low)}</div></div>
   </div>
+  ${(r.preguntas || []).length ? `<div class="card"><h3>El coach necesita saber</h3><ul>${r.preguntas.map(q => `<li>${esc(q)}</li>`).join("")}</ul><div class="muted">Respóndelo abajo como nota y se tendrá en cuenta.</div></div>` : ""}
   <div class="card"><h3>¿Cómo te sientes / cómo fue el entreno?</h3>
     <textarea id="note" placeholder="Se tendrá en cuenta en la próxima recomendación"></textarea>
     <p><button class="btn" onclick="addNote()">Guardar nota</button></p></div>`;
@@ -213,8 +214,11 @@ function ajustes() {
    <label>Objetivo</label><input id="s_name" value="${esc(s.goal_name)}" style="width:100%">
    <label>Fecha del objetivo</label><input id="s_date" type="date" value="${esc(s.goal_date)}">
    <label>Días de entreno por semana / disponibilidad</label><input id="s_days" value="${esc(s.days_week)}" style="width:100%" placeholder="p. ej. 5 días, largo el domingo">
+   <label>Hitos intermedios (10K, media maratón… con fechas)</label><textarea id="s_ms" style="min-height:60px">${esc(s.milestones)}</textarea>
    <label>Contexto (tu plan, marcas, lesiones, ritmos objetivo, instrucciones del otro proyecto…)</label>
    <textarea id="s_ctx" style="min-height:260px">${esc(s.context)}</textarea>
+   <label>Historial de sesiones anteriores (log en texto; solo para que el coach conozca tu evolución)</label>
+   <textarea id="s_hist" style="min-height:260px">${esc(s.history)}</textarea>
    <p><button class="btn" onclick="saveSettings()">Guardar</button> <span id="saved" class="muted"></span></p></div>`;
 }
 
@@ -227,7 +231,7 @@ async function importLog() {
   const r = await api("/api/import_log", { text: t }); await load(); alert("Importadas " + r.lineas + " líneas");
 }
 async function saveSettings() {
-  await api("/api/settings", { goal_name: $("s_name").value, goal_date: $("s_date").value, days_week: $("s_days").value, context: $("s_ctx").value });
+  await api("/api/settings", { goal_name: $("s_name").value, goal_date: $("s_date").value, days_week: $("s_days").value, context: $("s_ctx").value, milestones: $("s_ms").value, history: $("s_hist").value });
   await load(); $("saved") && ($("saved").textContent = "Guardado");
 }
 load();
