@@ -5,6 +5,8 @@ Modelo con COACH_MODEL.
 """
 import json
 import os
+import time
+import urllib.error
 import urllib.request
 from datetime import date, timedelta
 
@@ -36,8 +38,17 @@ def ask(prompt: str) -> str:
         f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent",
         data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json", "x-goog-api-key": os.environ["GEMINI_API_KEY"]})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return json.load(r)["candidates"][0]["content"]["parts"][0]["text"]
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                return json.load(r)["candidates"][0]["content"]["parts"][0]["text"]
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode(errors="replace")[:500]
+            if e.code in (429, 500, 503) and attempt < 4:
+                print(f"Gemini {e.code}, reintento {attempt + 1}/4: {detail}")
+                time.sleep(15 * (attempt + 1))
+                continue
+            raise SystemExit(f"Gemini {e.code}: {detail}")
 
 
 def main() -> None:
