@@ -1,3 +1,5 @@
 garminconnect
-supabase
 anthropic
+fastapi
+uvicorn
+itsdangerous

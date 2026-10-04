@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Garmin Coach</title>
+<style>
+  body { font-family: sans-serif; max-width: 700px; margin: 1em auto; padding: 0 1em; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { border-bottom: 1px solid #ccc; padding: 4px; text-align: left; }
+  input, button { font-size: 1em; padding: 6px; }
+  pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Garmin Coach</h1>
+<div id="login" hidden>
+  <input id="pass" type="password" placeholder="contraseña">
+  <button onclick="signIn()">Entrar</button>
+  <p id="msg"></p>
+</div>
+<div id="app" hidden>
+  <button onclick="signOut()">Salir</button>
+  <h2>Hoy</h2><div id="today"></div>
+  <h2>Próximos días</h2><div id="upcoming"></div>
+  <h2>Análisis</h2><pre id="analysis"></pre>
+  <h2>Últimos 14 días</h2><div id="metrics"></div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+async function signIn() {
+  const r = await fetch("/api/login", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ password: $("pass").value }) });
+  if (r.ok) load(); else $("msg").textContent = "Contraseña incorrecta";
+}
+async function signOut() { await fetch("/api/logout", { method: "POST" }); load(); }
+
+async function load() {
+  const r = await fetch("/api/data");
+  $("login").hidden = r.ok; $("app").hidden = !r.ok;
+  if (!r.ok) return;
+  const { recommendation: rec, metrics } = await r.json();
+  if (!rec) { $("today").textContent = "Aún no hay recomendación."; }
+  else {
+    const t = rec.today || {};
+    $("today").innerHTML = `<b>${esc(t.titulo)}</b> (${esc(t.tipo)}, ${esc(t.duracion_min)} min, ${esc(t.intensidad)})<br>${esc(t.detalle)}<br><i>${esc(t.motivo)}</i><br><small>${esc(rec.day)}</small>`;
+    $("upcoming").innerHTML = "<table>" + (rec.upcoming || []).map(u => `<tr><td>${esc(u.day)}</td><td>${esc(u.titulo)}</td><td>${esc(u.tipo)}</td><td>${esc(u.duracion_min)} min</td><td>${esc(u.intensidad)}</td></tr>`).join("") + "</table>";
+    $("analysis").textContent = rec.analysis || "";
+  }
+  $("metrics").innerHTML = "<table><tr><th>Día</th><th>HRV</th><th>Sueño (h)</th><th>FC reposo</th><th>Readiness</th><th>Body Battery máx</th></tr>" +
+    metrics.map(({ day, data: d }) => {
+      const sleep = d.sleep?.dailySleepDTO?.sleepTimeSeconds;
+      const ready = Array.isArray(d.readiness) ? d.readiness[0]?.score : d.readiness?.score;
+      return `<tr><td>${day}</td><td>${esc(d.hrv?.hrvSummary?.lastNightAvg)}</td><td>${sleep ? (sleep / 3600).toFixed(1) : ""}</td><td>${esc(d.summary?.restingHeartRate)}</td><td>${esc(ready)}</td><td>${esc(d.summary?.bodyBatteryHighestValue)}</td></tr>`;
+    }).join("") + "</table>";
+}
+load();
+</script>
+</body>
+</html>
