@@ -107,7 +107,7 @@ def data():
 @app.post("/api/settings", dependencies=[Depends(auth)])
 def save_settings(body: dict):
     db = conn()
-    for k in ("goal_name", "goal_date", "days_week", "context"):
+    for k in ("goal_name", "goal_date", "days_week", "context", "milestones", "history"):
         if k in body:
             db.execute("insert or replace into settings values (?, ?)", (k, str(body[k])))
     db.commit()

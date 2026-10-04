@@ -24,6 +24,8 @@ DEFAULTS = {
     "goal_date": "2027-04-04",
     "days_week": "",
     "context": "",
+    "milestones": "",
+    "history": "",
 }
 
 
