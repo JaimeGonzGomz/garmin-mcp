@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
 from coach.db import DATA, conn, get_extra, get_settings
+from coach.estado import calcular
 from coach.digest import activity_digest, calendar_digest, day_digest, plan_info, plan_tasks, weekly_volume
 
 app = FastAPI()
@@ -98,6 +99,7 @@ def data():
         "weekly": weekly_volume(acts),
         "calendar": cal,
         "plan": plan_info(plans),
+        "estado": calcular(metrics, acts, plans, st, get_extra(db, "race_predictions")),
         "race_predictions": get_extra(db, "race_predictions"),
         "log": [dict(r) for r in db.execute("select id, day, kind, text from log order by id desc limit 150")],
         "refreshing": refreshing(),
@@ -107,7 +109,7 @@ def data():
 @app.post("/api/settings", dependencies=[Depends(auth)])
 def save_settings(body: dict):
     db = conn()
-    for k in ("goal_name", "goal_date", "days_week", "context", "milestones", "history"):
+    for k in ("goal_name", "goal_date", "days_week", "context", "milestones", "history", "hr_max", "hr_recovery", "hr_long", "hr_easy"):
         if k in body:
             db.execute("insert or replace into settings values (?, ?)", (k, str(body[k])))
     db.commit()

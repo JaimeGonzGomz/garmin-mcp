@@ -24,6 +24,10 @@ DEFAULTS = {
     "goal_date": "2027-04-04",
     "days_week": "",
     "context": "",
+    "hr_max": "",
+    "hr_recovery": "",
+    "hr_long": "",
+    "hr_easy": "",
     "milestones": "",
     "history": "",
 }

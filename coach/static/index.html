@@ -64,7 +64,7 @@
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const num = (x, d = 0) => (x === null || x === undefined || x === "" ? "—" : (typeof x === "number" ? x.toFixed(d) : esc(x)));
-const TABS = [["hoy","Hoy"],["semana","Semana"],["analisis","Análisis"],["metricas","Métricas"],["registro","Registro"],["ajustes","Ajustes"]];
+const TABS = [["hoy","Hoy"],["estado","Estado"],["semana","Semana"],["analisis","Análisis"],["metricas","Métricas"],["registro","Registro"],["ajustes","Ajustes"]];
 let D = null, tab = localStorage.getItem("tab") || "hoy", poll = null;
 
 async function api(path, body) {
@@ -97,7 +97,7 @@ function show() {
   $("status").textContent = D.refreshing ? "Actualizando… (~1 min)" : (D.reco ? "Última recomendación: " + D.reco.day : "");
   $("refresh").disabled = D.refreshing;
   $("tabs").innerHTML = TABS.map(([k, n]) => `<button class="${k===tab?"on":""}" onclick="setTab('${k}')">${n}</button>`).join("");
-  $("view").innerHTML = ({hoy, semana, analisis, metricas, registro, ajustes})[tab]();
+  $("view").innerHTML = ({hoy, estado, semana, analisis, metricas, registro, ajustes})[tab]();
 }
 
 const chip = (v) => v ? `<span class="chip ${esc(String(v).toLowerCase())}">${esc(v)}</span>` : "";
@@ -157,6 +157,44 @@ function hoy() {
     <p><button class="btn" onclick="addNote()">Guardar nota</button></p></div>`;
 }
 
+
+const pace = p => p ? Math.floor(p) + ":" + String(Math.round((p % 1) * 60) % 60).padStart(2, "0") : "—";
+const delta = (a, b, inv) => (a == null || b == null) ? "" : `<span style="color:var(--${(inv ? a < b : a > b) ? "ok" : "warn"})">${a > b ? "▲" : a < b ? "▼" : "="} ${Math.abs(a - b).toFixed(1)}</span>`;
+
+function estado() {
+  const E = D.estado, X = (D.reco && D.reco.estado) || {}, est = X.estimaciones || {};
+  const kpi = (t, v, sub) => `<div class="card"><div class="muted">${t}</div><div class="big">${v}</div><div class="muted">${sub || ""}</div></div>`;
+  const v = E.vo2max, vol = E.volumen, hrv = E.hrv, c = E.carga;
+  const zon = E.zonas ? `<div class="card"><h3>Ritmos reales por tus zonas de FC</h3><div class="muted">Mediana de tus carreras de ≥3 km, últimos 28 días frente a los 28 anteriores (min/km).</div>
+    <table><tr><th>Zona</th><th>FC</th><th>Ritmo</th><th>Antes</th><th>Cambio</th><th>Sesiones</th></tr>${E.zonas.map(z => `<tr><td>${esc(z.zona)}</td><td>${esc(z.fc)}</td><td><b>${pace(z.pace)}</b></td><td>${pace(z.pace_prev)}</td>
+    <td>${z.pace && z.pace_prev ? (d => `<span style="color:var(--${d > 0 ? "ok" : "warn"})">${d > 0 ? "−" : "+"}${Math.abs(d)} s/km</span>`)(Math.round((z.pace_prev - z.pace) * 60)) : ""}</td><td>${z.n} <span class="muted">(antes ${z.n_prev})</span></td></tr>`).join("")}</table></div>`
+    : `<div class="card muted">Para ver tus ritmos por zona, indica tus zonas de FC en <b>Ajustes</b>.</div>`;
+  const objetivos = (X.ritmos_objetivo || []).length ? `<div class="card"><h3>Ritmos objetivo (coach)</h3><table>${X.ritmos_objetivo.map(r => `<tr><td>${esc(r.zona)}</td><td><b>${esc(r.ritmo)}</b></td><td>${esc(r.uso)}</td></tr>`).join("")}</table></div>` : "";
+  const estim = Object.keys(est).length ? `<div class="card"><h3>Estimaciones del coach <span class="chip ${est.confianza === "alta" ? "bien" : est.confianza === "media" ? "atencion" : ""}">${esc(est.confianza)}</span></h3>
+    <div class="muted">Son orientativas, no un resultado de carrera.</div>
+    <table><tr><td>VO2max</td><td>${esc(est.vo2max)}</td></tr><tr><td>Maratón</td><td><b>${esc(est.maraton_tiempo)}</b> (${esc(est.maraton_ritmo)})</td></tr>
+    <tr><td>Media maratón</td><td>${esc(est.media_tiempo)}</td></tr><tr><td>10K</td><td>${esc(est["10k_tiempo"])}</td></tr><tr><td>5K</td><td>${esc(est["5k_tiempo"])}</td></tr></table>
+    <div class="muted" style="margin-top:6px">Base: ${esc(est.base)}</div></div>` : "";
+  const gp = E.prediccion_garmin ? Object.entries(Array.isArray(E.prediccion_garmin) ? (E.prediccion_garmin[0] || {}) : E.prediccion_garmin).filter(([k, x]) => /time/i.test(k) && typeof x === "number")
+    .map(([k, x]) => `${esc(k.replace(/Time$/i, ""))}: ${Math.floor(x/3600)}:${String(Math.floor(x%3600/60)).padStart(2,"0")}:${String(Math.round(x%60)).padStart(2,"0")}`).join(" · ") : "";
+  return `
+  ${X.resumen ? `<div class="card"><h3>Overview</h3>${esc(X.resumen)}</div>` : ""}
+  <div class="grid">
+    ${kpi("VO2max (Garmin)", num(v.actual, 1), "hace 30 d: " + num(v.hace_30d, 1) + " " + delta(v.actual, v.hace_30d) + " · 60 d: " + num(v.hace_60d, 1))}
+    ${kpi("Km últimas 2 semanas", num(vol.km_14d, 1), `previas: ${num(vol.km_14d_previos, 1)} · ${vol.cambio_pct == null ? "—" : (vol.cambio_pct > 0 ? "+" : "") + vol.cambio_pct + "%"} ${vol.alerta_10pct ? '<span class="chip atencion">&gt;10%</span>' : ""}`)}
+    ${kpi("FC en reposo (7 d)", num(E.rhr.ult7, 1), "21 d previos: " + num(E.rhr.prev21, 1) + " " + delta(E.rhr.ult7, E.rhr.prev21, true))}
+    ${kpi("HRV (7 d)", num(hrv.ult7, 0), `rango ${num(hrv.rango[0])}–${num(hrv.rango[1])} · ${esc(hrv.estado)}`)}
+    ${kpi("Sueño (7 d)", num(E.sueno.ult7, 1) + " h", "21 d previos: " + num(E.sueno.prev21, 1))}
+    ${kpi("Carga aguda/crónica", num(c.aguda) + " / " + num(c.cronica), `ratio ${num(c.acwr, 1)} · ${esc(c.estado)}`)}
+    ${kpi("Tirada más larga (28 d)", E.largo_28d ? num(E.largo_28d.km, 1) + " km" : "—", E.largo_28d ? `${num(E.largo_28d.min)} min · FC ${num(E.largo_28d.fc)} · ${esc(E.largo_28d.dia)}` : "")}
+    ${kpi("Días sin correr", num(E.dias_sin_correr), "fuerza últimas 2 semanas: " + E.fuerza_14d + " sesiones")}
+    ${kpi("Plan Garmin (14 d)", E.plan_14d.hechas + " / " + E.plan_14d.programadas, "sesiones hechas")}
+  </div>
+  ${zon}${objetivos}${estim}
+  ${gp ? `<div class="card"><h3>Predicciones de Garmin (referencia)</h3>${gp}</div>` : ""}
+  ${(X.recomendaciones_generales || []).length ? `<div class="card"><h3>Recomendaciones generales</h3><ul>${X.recomendaciones_generales.map(r => `<li>${esc(r)}</li>`).join("")}</ul></div>` : '<div class="card muted">Las estimaciones y recomendaciones generales aparecen tras pulsar <b>Actualizar ahora</b>.</div>'}`;
+}
+
 function semana() {
   const r = D.reco;
   const up = r ? (r.upcoming || []).map(u => `<tr><td>${esc(u.day)}</td><td><b>${esc(u.titulo)}</b><div class="muted">${esc(u.notas)}</div></td>
@@ -214,6 +252,9 @@ function ajustes() {
    <label>Objetivo</label><input id="s_name" value="${esc(s.goal_name)}" style="width:100%">
    <label>Fecha del objetivo</label><input id="s_date" type="date" value="${esc(s.goal_date)}">
    <label>Días de entreno por semana / disponibilidad</label><input id="s_days" value="${esc(s.days_week)}" style="width:100%" placeholder="p. ej. 5 días, largo el domingo">
+   <label>Zonas de FC (lpm)</label>
+   <div class="row"><input id="s_hrmax" value="${esc(s.hr_max)}" placeholder="FC máx" size="8"><input id="s_hrrec" value="${esc(s.hr_recovery)}" placeholder="recup. &lt;" size="8">
+   <input id="s_hrlong" value="${esc(s.hr_long)}" placeholder="TL &lt;" size="8"><input id="s_hreasy" value="${esc(s.hr_easy)}" placeholder="fácil &lt;" size="8"></div>
    <label>Hitos intermedios (10K, media maratón… con fechas)</label><textarea id="s_ms" style="min-height:60px">${esc(s.milestones)}</textarea>
    <label>Contexto (tu plan, marcas, lesiones, ritmos objetivo, instrucciones del otro proyecto…)</label>
    <textarea id="s_ctx" style="min-height:260px">${esc(s.context)}</textarea>
@@ -231,7 +272,7 @@ async function importLog() {
   const r = await api("/api/import_log", { text: t }); await load(); alert("Importadas " + r.lineas + " líneas");
 }
 async function saveSettings() {
-  await api("/api/settings", { goal_name: $("s_name").value, goal_date: $("s_date").value, days_week: $("s_days").value, context: $("s_ctx").value, milestones: $("s_ms").value, history: $("s_hist").value });
+  await api("/api/settings", { goal_name: $("s_name").value, goal_date: $("s_date").value, days_week: $("s_days").value, context: $("s_ctx").value, milestones: $("s_ms").value, hr_max: $("s_hrmax").value, hr_recovery: $("s_hrrec").value, hr_long: $("s_hrlong").value, hr_easy: $("s_hreasy").value, history: $("s_hist").value });
   await load(); $("saved") && ($("saved").textContent = "Guardado");
 }
 load();
