@@ -30,3 +30,7 @@ Luego:
 Comprobar que se rellenan las metricas: `cd /opt/garmin-coach && sudo .venv/bin/python -m coach.digest` (los campos `null` no se encontraron en los datos de Garmin).
 
 Actualizar: `bash /opt/garmin-coach/deploy/update.sh`. Se ejecuta solo cada dia a las 05:30 (systemd timer).
+
+## Enviar el entreno de hoy al reloj
+En la pestana Hoy, "Enviar a mi Garmin" crea el entreno estructurado en Garmin Connect (calentamiento, tramos con FC o ritmo objetivo,
+enfriamiento) y lo programa hoy; el reloj lo recoge al sincronizar. Solo carreras. "ver JSON" muestra lo que se enviaria.

@@ -30,13 +30,42 @@ def _back(metrics, key, days_ago):
     return None
 
 
-def zonas(acts, st):
+def garmin_bands(hr_zones):
+    """Zonas de FC de Garmin (running si existe, si no DEFAULT) -> [(nombre, etiqueta, funcion)] y FC max usada."""
+    if not isinstance(hr_zones, list):
+        return None, None
+    by = {str(z.get("sport", "")).upper(): z for z in hr_zones if isinstance(z, dict)}
+    z = by.get("RUNNING") or by.get("DEFAULT") or next(iter(by.values()), None)
+    try:
+        f = [float(z[f"zone{i}Floor"]) for i in range(1, 6)]
+        mx = float(z.get("maxHeartRateUsed") or 0) or None
+    except (TypeError, ValueError, KeyError):
+        return None, None
+    names = ["Z1 recuperación", "Z2 aeróbica", "Z3 tempo", "Z4 umbral", "Z5 máximo"]
+    bands = []
+    for i in range(5):
+        lo = f[i] if i else 0
+        hi = f[i + 1] if i < 4 else 999
+        label = f"{f[i]:.0f}–{(f[i + 1] - 1):.0f}" if i < 4 else f"≥ {f[4]:.0f}"
+        bands.append((names[i], label, (lambda h, lo=lo, hi=hi: lo <= h < hi)))
+    return bands, mx
+
+
+def zonas(acts, st, hr_zones=None):
     """Ritmo medio real por zona de FC del usuario (ajustes hr_recovery < hr_long < hr_easy)."""
-    rec, lng, easy = (_num(st.get(k)) for k in ("hr_recovery", "hr_long", "hr_easy"))
-    if not (rec and lng and easy):
-        return None
-    bands = [("Recuperación", f"< {rec:.0f}", lambda h: h <= rec), ("Tirada larga", f"{rec:.0f}–{lng:.0f}", lambda h: rec < h <= lng),
+    bands, source, mx = None, "manual", None
+    if st.get("zonas_fuente", "garmin") == "garmin":
+        bands, mx = garmin_bands(hr_zones)
+        source = "garmin"
+    if not bands:
+        source = "manual"
+        rec, lng, easy = (_num(st.get(k)) for k in ("hr_recovery", "hr_long", "hr_easy"))
+        if not (rec and lng and easy):
+            return None
+    if source == "manual":
+        bands = [("Recuperación", f"< {rec:.0f}", lambda h: h <= rec), ("Tirada larga", f"{rec:.0f}–{lng:.0f}", lambda h: rec < h <= lng),
              ("Rodaje fácil", f"{lng:.0f}–{easy:.0f}", lambda h: lng < h <= easy), ("Sobre fácil (tempo/series)", f"> {easy:.0f}", lambda h: h > easy)]
+        mx = _num(st.get("hr_max"))
     today = date.today()
     runs = [a for a in acts if a["type"] in RUN_TYPES and (a["km"] or 0) >= 3 and a["hr"] and a["pace"] and _d(a)]
     out = []
@@ -45,10 +74,10 @@ def zonas(acts, st):
         prev = [a["pace"] for a in runs if f(a["hr"]) and 28 <= (today - _d(a)).days < 56]
         out.append({"zona": name, "fc": label, "n": len(cur), "pace": round(median(cur), 2) if cur else None,
                     "n_prev": len(prev), "pace_prev": round(median(prev), 2) if prev else None})
-    return out
+    return {"fuente": source, "fc_max": mx, "zonas": out}
 
 
-def calcular(metrics, acts, plans, st, race_predictions=None):
+def calcular(metrics, acts, plans, st, race_predictions=None, hr_zones=None):
     today = date.today()
     runs = [a for a in acts if a["type"] in RUN_TYPES and _d(a)]
     km = lambda a, b: round(sum(x["km"] or 0 for x in runs if a <= (today - _d(x)).days <= b), 1)
@@ -71,6 +100,6 @@ def calcular(metrics, acts, plans, st, race_predictions=None):
         "dias_sin_correr": (today - last_run).days if last_run else None,
         "fuerza_14d": sum(1 for a in acts if a["type"] == "strength_training" and _d(a) and (today - _d(a)).days < 14),
         "plan_14d": {"hechas": done, "programadas": len(tasks)},
-        "zonas": zonas(acts, st),
+        "zonas": zonas(acts, st, hr_zones),
         "prediccion_garmin": race_predictions,
     }

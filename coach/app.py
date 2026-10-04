@@ -99,8 +99,9 @@ def data():
         "weekly": weekly_volume(acts),
         "calendar": cal,
         "plan": plan_info(plans),
-        "estado": calcular(metrics, acts, plans, st, get_extra(db, "race_predictions")),
+        "estado": calcular(metrics, acts, plans, st, get_extra(db, "race_predictions"), get_extra(db, "hr_zones")),
         "race_predictions": get_extra(db, "race_predictions"),
+        "sent": {r["day"]: {"name": r["name"], "at": r["sent_at"]} for r in db.execute("select * from sent order by day desc limit 14")},
         "log": [dict(r) for r in db.execute("select id, day, kind, text from log order by id desc limit 150")],
         "refreshing": refreshing(),
     }
@@ -109,7 +110,7 @@ def data():
 @app.post("/api/settings", dependencies=[Depends(auth)])
 def save_settings(body: dict):
     db = conn()
-    for k in ("goal_name", "goal_date", "days_week", "context", "milestones", "history", "hr_max", "hr_recovery", "hr_long", "hr_easy"):
+    for k in ("goal_name", "goal_date", "days_week", "context", "milestones", "history", "hr_max", "hr_recovery", "hr_long", "hr_easy", "zonas_fuente"):
         if k in body:
             db.execute("insert or replace into settings values (?, ?)", (k, str(body[k])))
     db.commit()
@@ -156,3 +157,40 @@ def refresh():
 def refresh_log():
     p = DATA / "refresh.log"
     return {"log": p.read_text()[-3000:] if p.exists() else ""}
+
+
+def _today_workout(db):
+    day = date.today().isoformat()
+    rec = db.execute("select data from reco where day = ?", (day,)).fetchone()
+    if not rec:
+        raise HTTPException(400, "No hay recomendacion de hoy; pulsa 'Actualizar ahora'.")
+    return day, json.loads(rec["data"]).get("today") or {}
+
+
+@app.get("/api/preview_workout", dependencies=[Depends(auth)])
+def preview_workout():
+    from coach.garmin_push import build_workout
+    day, today = _today_workout(conn())
+    try:
+        return build_workout(today, day)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/send_workout", dependencies=[Depends(auth)])
+def send_workout():
+    from coach.garmin_push import build_workout, push
+    db = conn()
+    day, today = _today_workout(db)
+    try:
+        w = build_workout(today, day)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    prev = db.execute("select workout_id from sent where day = ?", (day,)).fetchone()
+    try:
+        r = push(w, day, prev["workout_id"] if prev else None)
+    except Exception as e:
+        raise HTTPException(502, f"Garmin rechazo el entreno: {str(e)[:400]}")
+    db.execute("insert or replace into sent (day, workout_id, name) values (?, ?, ?)", (day, str(r["workout_id"]), w["workoutName"]))
+    db.commit()
+    return {"ok": True, **r, "name": w["workoutName"]}
