@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Garmin Coach</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  body { font-family: sans-serif; max-width: 700px; margin: 1em auto; padding: 0 1em; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { border-bottom: 1px solid #ccc; padding: 4px; text-align: left; }
+  input, button { font-size: 1em; padding: 6px; margin: 2px 0; }
+  pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Garmin Coach</h1>
+
+<div id="login" hidden>
+  <input id="email" type="email" placeholder="email"><br>
+  <input id="pass" type="password" placeholder="contraseña"><br>
+  <button onclick="signIn()">Entrar</button>
+  <button onclick="signUp()">Crear cuenta</button>
+  <p id="msg"></p>
+</div>
+
+<div id="app" hidden>
+  <button onclick="sb.auth.signOut()">Salir</button>
+  <h2>Hoy</h2><div id="today"></div>
+  <h2>Próximos días</h2><div id="upcoming"></div>
+  <h2>Análisis</h2><pre id="analysis"></pre>
+  <h2>Últimos 14 días</h2><div id="metrics"></div>
+</div>
+
+<script>
+// Rellena con los valores de Supabase > Project Settings > API (la anon key es publica)
+const SUPABASE_URL = "PEGA_AQUI_URL";
+const SUPABASE_ANON_KEY = "PEGA_AQUI_ANON_KEY";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+async function signIn() {
+  const { error } = await sb.auth.signInWithPassword({ email: $("email").value, password: $("pass").value });
+  if (error) $("msg").textContent = error.message;
+}
+async function signUp() {
+  const { error } = await sb.auth.signUp({ email: $("email").value, password: $("pass").value });
+  $("msg").textContent = error ? error.message : "Revisa tu email para confirmar la cuenta.";
+}
+
+async function load() {
+  const { data: rec } = await sb.from("recommendations").select("*").order("day", { ascending: false }).limit(1);
+  const r = rec && rec[0];
+  if (!r) { $("today").textContent = "Aún no hay recomendación."; }
+  else {
+    const t = r.today || {};
+    $("today").innerHTML = `<b>${esc(t.titulo)}</b> (${esc(t.tipo)}, ${esc(t.duracion_min)} min, ${esc(t.intensidad)})<br>${esc(t.detalle)}<br><i>${esc(t.motivo)}</i><br><small>${esc(r.day)}</small>`;
+    $("upcoming").innerHTML = "<table>" + (r.upcoming || []).map(u => `<tr><td>${esc(u.day)}</td><td>${esc(u.titulo)}</td><td>${esc(u.tipo)}</td><td>${esc(u.duracion_min)} min</td><td>${esc(u.intensidad)}</td></tr>`).join("") + "</table>";
+    $("analysis").textContent = r.analysis || "";
+  }
+  const { data: m } = await sb.from("daily_metrics").select("day,data").order("day", { ascending: false }).limit(14);
+  $("metrics").innerHTML = "<table><tr><th>Día</th><th>HRV</th><th>Sueño (h)</th><th>FC reposo</th><th>Readiness</th><th>Body Battery máx</th></tr>" +
+    (m || []).map(({ day, data: d }) => {
+      const hrv = d.hrv?.hrvSummary?.lastNightAvg;
+      const sleep = d.sleep?.dailySleepDTO?.sleepTimeSeconds;
+      const rhr = d.summary?.restingHeartRate;
+      const ready = Array.isArray(d.readiness) ? d.readiness[0]?.score : d.readiness?.score;
+      const bb = d.summary?.bodyBatteryHighestValue;
+      return `<tr><td>${day}</td><td>${esc(hrv)}</td><td>${sleep ? (sleep / 3600).toFixed(1) : ""}</td><td>${esc(rhr)}</td><td>${esc(ready)}</td><td>${esc(bb)}</td></tr>`;
+    }).join("") + "</table>";
+}
+
+sb.auth.onAuthStateChange((_e, session) => {
+  $("login").hidden = !!session;
+  $("app").hidden = !session;
+  if (session) load();
+});
+</script>
+</body>
+</html>
