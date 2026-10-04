@@ -10,19 +10,37 @@ import urllib.error
 import urllib.request
 from datetime import date, timedelta
 
-from coach.db import conn, dumps
+from coach.db import conn, dumps, get_extra, get_settings
+from coach.digest import activity_digest, calendar_digest, day_digest, weekly_volume
 
 PROVIDER = os.getenv("COACH_PROVIDER", "gemini")
 DEFAULT_MODELS = "claude-sonnet-5-5" if PROVIDER == "anthropic" else (
     "gemini-3.8-flash,gemini-3.7-flash,gemini-3.5-flash-lite,gemini-2.5-flash,gemini-2.5-flash-lite")
 MODELS = [m.strip() for m in (os.getenv("COACH_MODEL") or DEFAULT_MODELS).split(",") if m.strip()]
 
-SYSTEM = """Eres un entrenador personal de resistencia. Recibes datos de Garmin del usuario
-(HRV, sueno, readiness, carga, actividades recientes) y devuelves SOLO un JSON con:
-{"today": {"titulo","tipo","duracion_min","intensidad","detalle","motivo"},
- "upcoming": [{"day":"YYYY-MM-DD","titulo","tipo","duracion_min","intensidad"} x6 dias siguientes],
- "analysis": "overview detallada en espanol (markdown): estado de recuperacion, carga, tendencias, riesgos"}
-Si HRV/sueno/readiness indican fatiga, recomienda descanso o sesion suave. Se concreto y breve."""
+SYSTEM = """Eres un entrenador de running experto y prudente. Preparas al usuario para su maraton objetivo.
+Recibes JSON con: objetivo y semanas restantes, contexto del usuario (plan/historial de otro proyecto), registro
+reciente, metricas diarias de Garmin (HRV, sueno, readiness, carga, FC reposo, Body Battery), actividades recientes,
+volumen semanal, el calendario de entrenos de Garmin (incluye Garmin Coach) y predicciones de carrera.
+Reglas: progresion de carga segura (no subir el volumen semanal mas de ~10%), semana de descarga cada 3-4 semanas,
+afinar hacia la carrera (fases base/desarrollo/especifica/taper segun semanas restantes). Si HRV baja, sueno malo o
+readiness bajo, recorta o descansa. Contrasta SIEMPRE el entreno de hoy con el que Garmin Coach tiene programado.
+Responde SOLO con un JSON (en espanol) con esta forma exacta:
+{
+ "fase": "base|desarrollo|especifica|taper",
+ "resumen": "2-3 frases con la conclusion del dia",
+ "today": {"titulo","tipo","duracion_min","distancia_km","intensidad":"descanso|suave|moderada|fuerte",
+   "pasos":[{"nombre","detalle"}], "motivo",
+   "garmin_coach": {"planificado":"que tiene programado Garmin hoy o 'nada'","decision":"seguir|modificar|sustituir|descanso","comentario"}},
+ "upcoming": [{"day":"YYYY-MM-DD","titulo","tipo","duracion_min","distancia_km","intensidad","notas"} x7 dias siguientes],
+ "analisis": {
+   "recuperacion": {"estado":"bien|atencion|mal","texto"},
+   "sueno": {"estado","texto"}, "hrv": {"estado","texto"}, "carga": {"estado","texto"},
+   "progreso_objetivo": {"estado","texto"}, "semana": {"estado","texto"},
+   "riesgos": ["..."], "recomendaciones": ["..."]},
+ "log_entry": "una frase para el registro del dia"
+}
+Cada "texto" con cifras concretas de los datos (valores, comparacion con tu media, tendencia). Si falta un dato, dilo."""
 
 
 def ask(prompt: str, model: str) -> str:
@@ -60,7 +78,7 @@ def generate(prompt: str) -> dict:
         try:
             text = ask(prompt, model)
             res = json.loads(text[text.index("{"): text.rindex("}") + 1])
-            for k in ("today", "upcoming", "analysis"):
+            for k in ("today", "upcoming", "analisis"):
                 res[k]
             print("modelo usado:", model)
             return res
@@ -71,20 +89,45 @@ def generate(prompt: str) -> dict:
     raise SystemExit("Todos los modelos fallaron:\n" + "\n".join(errors))
 
 
+def build_prompt(db) -> str:
+    st = get_settings(db)
+    today = date.today()
+    since = (today - timedelta(days=21)).isoformat()
+    metrics = [{"day": r["day"], **day_digest(json.loads(r["data"]))}
+               for r in db.execute("select * from daily_metrics where day >= ? order by day", (since,))]
+    acts = [activity_digest(json.loads(r["data"]))
+            for r in db.execute("select data from activities order by start_time")]
+    cal = [c for c in (get_extra(db, "calendar") or [])]
+    plan = calendar_digest(cal, (today - timedelta(days=3)).isoformat(), (today + timedelta(days=14)).isoformat())
+    log = [dict(r) for r in db.execute("select day, kind, text from log order by id desc limit 30")][::-1]
+    try:
+        weeks_left = max(0, (date.fromisoformat(st["goal_date"]) - today).days // 7)
+    except ValueError:
+        weeks_left = None
+    payload = {
+        "hoy": today.isoformat(),
+        "objetivo": {"nombre": st["goal_name"], "fecha": st["goal_date"], "semanas_restantes": weeks_left,
+                     "dias_entreno_por_semana": st["days_week"] or "no indicado"},
+        "contexto_usuario": st["context"][:12000],
+        "registro_reciente": log,
+        "metricas_diarias": metrics,
+        "actividades_recientes": acts[-30:],
+        "volumen_semanal": weekly_volume(acts),
+        "plan_garmin_calendario": plan,
+        "predicciones_carrera": (dumps(get_extra(db, "race_predictions"))[:2500]),
+        "umbral_lactato": (dumps(get_extra(db, "lactate"))[:1500]),
+        "resistencia": (dumps(get_extra(db, "endurance"))[:1500]),
+    }
+    return dumps(payload)
+
+
 def main() -> None:
     db = conn()
-    since = (date.today() - timedelta(days=14)).isoformat()
-    metrics = [{"day": r["day"], "data": json.loads(r["data"])}
-               for r in db.execute("select * from daily_metrics where day >= ? order by day", (since,))]
-    acts = []
-    for r in db.execute("select type, data from activities where start_time >= ? order by start_time", (since,)):
-        a = json.loads(r["data"])
-        acts.append({k: a.get(k) for k in ("activityName", "startTimeLocal", "distance", "duration", "averageHR",
-                                           "maxHR", "aerobicTrainingEffect", "activityTrainingLoad")} | {"type": r["type"]})
-    prompt = f"Hoy es {date.today().isoformat()}.\nMETRICAS:\n{dumps(metrics)[:60000]}\nACTIVIDADES:\n{dumps(acts)[:20000]}"
-    res = generate(prompt)
-    db.execute("insert or replace into recommendations (day, today, upcoming, analysis) values (?, ?, ?, ?)",
-               (date.today().isoformat(), dumps(res["today"]), dumps(res["upcoming"]), res["analysis"]))
+    res = generate(build_prompt(db))
+    today = date.today().isoformat()
+    db.execute("insert or replace into reco (day, data) values (?, ?)", (today, dumps(res)))
+    db.execute("delete from log where day = ? and kind = 'coach'", (today,))
+    db.execute("insert into log (day, kind, text) values (?, 'coach', ?)", (today, str(res.get("log_entry") or res.get("resumen", ""))))
     db.commit()
     print("recomendacion guardada")
 

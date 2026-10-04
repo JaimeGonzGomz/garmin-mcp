@@ -3,7 +3,7 @@
 Tokens de Garmin: carpeta data/tokens (se copia desde tu PC, ver README).
 """
 import sys
-from datetime import date, timedelta
+from datetime import date, timedelta  # noqa
 
 from garminconnect import Garmin
 
@@ -41,11 +41,25 @@ def sync(days: int = 7) -> None:
             for k in drop:
                 (data[key] or {}).pop(k, None)
         db.execute("insert or replace into daily_metrics values (?, ?)", (d, dumps(data)))
-    start = (date.today() - timedelta(days=max(days, 28))).isoformat()
+    start = (date.today() - timedelta(days=max(days, 120))).isoformat()
     acts = safe(g.get_activities_by_date, start, date.today().isoformat()) or []
     for a in acts:
         db.execute("insert or replace into activities values (?, ?, ?, ?)",
                    (a["activityId"], a.get("startTimeGMT"), (a.get("activityType") or {}).get("typeKey"), dumps(a)))
+    t = date.today()
+    nxt = (t.replace(day=1) + timedelta(days=32)).replace(day=1)
+    nxt2 = (nxt + timedelta(days=32)).replace(day=1)
+    months = [safe(g.get_scheduled_workouts, d.year, d.month) for d in (t, nxt, nxt2)]
+    extras = {
+        "calendar": months,
+        "race_predictions": safe(g.get_race_predictions),
+        "lactate": safe(g.get_lactate_threshold),
+        "endurance": safe(g.get_endurance_score, (t - timedelta(days=60)).isoformat(), t.isoformat()),
+        "weigh_ins": safe(g.get_weigh_ins, (t - timedelta(days=60)).isoformat(), t.isoformat()),
+    }
+    for k, v in extras.items():
+        if v is not None:
+            db.execute("insert or replace into extra (key, data, updated) values (?, ?, current_timestamp)", (k, dumps(v)))
     db.commit()
     print(f"sync ok: {days} dias, {len(acts)} actividades")
 
