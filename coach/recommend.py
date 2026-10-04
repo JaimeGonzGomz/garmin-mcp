@@ -5,9 +5,8 @@ Modelo con COACH_MODEL.
 """
 import json
 import os
-from datetime import date, timedelta
-
 import urllib.request
+from datetime import date, timedelta
 
 from coach.db import conn, dumps
 
@@ -25,7 +24,34 @@ Si HRV/sueno/readiness indican fatiga, recomienda descanso o sesion suave. Se co
 def ask(prompt: str) -> str:
     if PROVIDER == "anthropic":
         import anthropic
-        text = ask(prompt)
+        msg = anthropic.Anthropic().messages.create(
+            model=MODEL, max_tokens=4000, system=SYSTEM, messages=[{"role": "user", "content": prompt}])
+        return msg.content[0].text
+    body = {
+        "systemInstruction": {"parts": [{"text": SYSTEM}]},
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {"responseMimeType": "application/json", "maxOutputTokens": 8000},
+    }
+    req = urllib.request.Request(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent",
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json", "x-goog-api-key": os.environ["GEMINI_API_KEY"]})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        return json.load(r)["candidates"][0]["content"]["parts"][0]["text"]
+
+
+def main() -> None:
+    db = conn()
+    since = (date.today() - timedelta(days=14)).isoformat()
+    metrics = [{"day": r["day"], "data": json.loads(r["data"])}
+               for r in db.execute("select * from daily_metrics where day >= ? order by day", (since,))]
+    acts = []
+    for r in db.execute("select type, data from activities where start_time >= ? order by start_time", (since,)):
+        a = json.loads(r["data"])
+        acts.append({k: a.get(k) for k in ("activityName", "startTimeLocal", "distance", "duration", "averageHR",
+                                           "maxHR", "aerobicTrainingEffect", "activityTrainingLoad")} | {"type": r["type"]})
+    prompt = f"Hoy es {date.today().isoformat()}.\nMETRICAS:\n{dumps(metrics)[:60000]}\nACTIVIDADES:\n{dumps(acts)[:20000]}"
+    text = ask(prompt)
     res = json.loads(text[text.index("{"): text.rindex("}") + 1])
     db.execute("insert or replace into recommendations (day, today, upcoming, analysis) values (?, ?, ?, ?)",
                (date.today().isoformat(), dumps(res["today"]), dumps(res["upcoming"]), res["analysis"]))
