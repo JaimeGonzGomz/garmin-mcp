@@ -14,13 +14,17 @@ Los tokens se guardan en ~/.garmin-mcp-tokens (fuera del repo).
 
 # Garmin Coach (recomendacion diaria)
 
-Flujo: Garmin -> `coach/sync.py` -> Supabase -> `coach/recommend.py` (Claude) -> Supabase -> `web/index.html`.
-Se ejecuta a diario con `.github/workflows/daily.yml`.
+Garmin -> `coach/sync.py` -> SQLite -> `coach/recommend.py` (Claude) -> web (`coach/app.py`) en contentaimaker.com.
+Todo corre en un servidor Hetzner (Ubuntu/Debian), sin Supabase.
 
-## Pasos de puesta en marcha
-1. Crear proyecto en Supabase y ejecutar `supabase/schema.sql` en el SQL Editor.
-2. Crear tu usuario (email+contrasena) desde la web o Auth > Users y copiar su UUID.
-3. `python login.py` en tu PC (genera tokens de Garmin).
-4. Con las variables `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `COACH_USER_ID`: `python -m coach.upload_tokens`.
-5. Secrets de GitHub: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `COACH_USER_ID`, `ANTHROPIC_API_KEY`.
-6. Poner URL y anon key en `web/index.html` y publicar `web/` (GitHub Pages o Netlify).
+## Despliegue (una vez, como root en el servidor)
+    git clone https://github.com/JaimeGonzGomz/garmin-mcp /opt/garmin-coach
+    cd /opt/garmin-coach && git checkout claude/serene-hamilton-388b4o
+    bash deploy/setup.sh
+Luego:
+1. En tu PC: `python login.py`, y copia los tokens: `scp -r ~/.garmin-mcp-tokens root@IP:/opt/garmin-coach/data/tokens`
+2. En el servidor, edita `/opt/garmin-coach/.env` y pon `ANTHROPIC_API_KEY`; la contrasena de la web esta ahi (`COACH_PASSWORD`).
+3. Primera ejecucion: `cd /opt/garmin-coach && set -a && . ./.env && .venv/bin/python -m coach.sync 14 && .venv/bin/python -m coach.recommend`
+4. El DNS de contentaimaker.com (y www) debe apuntar a la IP del servidor.
+
+Actualizar: `bash /opt/garmin-coach/deploy/update.sh`. Se ejecuta solo cada dia a las 05:30 (systemd timer).
