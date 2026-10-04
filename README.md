@@ -23,7 +23,7 @@ Todo corre en un servidor Hetzner (Ubuntu/Debian), sin Supabase.
     bash deploy/setup.sh
 Luego:
 1. En tu PC: `python login.py`, y copia los tokens: `scp -r ~/.garmin-mcp-tokens root@IP:/opt/garmin-coach/data/tokens`
-2. En el servidor, edita `/opt/garmin-coach/.env` y pon `ANTHROPIC_API_KEY`; la contrasena de la web esta ahi (`COACH_PASSWORD`).
+2. En el servidor, edita `/opt/garmin-coach/.env` y pon `GEMINI_API_KEY`; la contrasena de la web esta ahi (`COACH_PASSWORD`).
 3. Primera ejecucion: `cd /opt/garmin-coach && set -a && . ./.env && .venv/bin/python -m coach.sync 14 && .venv/bin/python -m coach.recommend`
 4. El DNS de contentaimaker.com (y www) debe apuntar a la IP del servidor.
 

@@ -31,7 +31,8 @@ if [ ! -f .env ]; then
   cat > .env <<ENV
 COACH_PASSWORD=$(openssl rand -base64 12)
 SESSION_SECRET=$(openssl rand -hex 32)
-ANTHROPIC_API_KEY=PEGA_AQUI_TU_CLAVE
+GEMINI_API_KEY=PEGA_AQUI_TU_CLAVE
+COACH_PROVIDER=gemini
 ENV
   chmod 600 .env
   echo ">>> Contrasena de la web generada en $APP/.env (COACH_PASSWORD). Edita ANTHROPIC_API_KEY ahi."

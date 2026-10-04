@@ -1,13 +1,18 @@
-"""Genera la recomendacion diaria con Claude. Uso: python -m coach.recommend (requiere ANTHROPIC_API_KEY)"""
+"""Genera la recomendacion diaria. Uso: python -m coach.recommend
+
+Proveedor con COACH_PROVIDER: gemini (por defecto, GEMINI_API_KEY) o anthropic (ANTHROPIC_API_KEY).
+Modelo con COACH_MODEL.
+"""
 import json
 import os
 from datetime import date, timedelta
 
-import anthropic
+import urllib.request
 
 from coach.db import conn, dumps
 
-MODEL = os.getenv("COACH_MODEL", "claude-sonnet-5-5")
+PROVIDER = os.getenv("COACH_PROVIDER", "gemini")
+MODEL = os.getenv("COACH_MODEL") or ("claude-sonnet-5-5" if PROVIDER == "anthropic" else "gemini-2.5-flash")
 
 SYSTEM = """Eres un entrenador personal de resistencia. Recibes datos de Garmin del usuario
 (HRV, sueno, readiness, carga, actividades recientes) y devuelves SOLO un JSON con:
@@ -17,20 +22,10 @@ SYSTEM = """Eres un entrenador personal de resistencia. Recibes datos de Garmin 
 Si HRV/sueno/readiness indican fatiga, recomienda descanso o sesion suave. Se concreto y breve."""
 
 
-def main() -> None:
-    db = conn()
-    since = (date.today() - timedelta(days=14)).isoformat()
-    metrics = [{"day": r["day"], "data": json.loads(r["data"])}
-               for r in db.execute("select * from daily_metrics where day >= ? order by day", (since,))]
-    acts = []
-    for r in db.execute("select type, data from activities where start_time >= ? order by start_time", (since,)):
-        a = json.loads(r["data"])
-        acts.append({k: a.get(k) for k in ("activityName", "startTimeLocal", "distance", "duration", "averageHR",
-                                           "maxHR", "aerobicTrainingEffect", "activityTrainingLoad")} | {"type": r["type"]})
-    prompt = f"Hoy es {date.today().isoformat()}.\nMETRICAS:\n{dumps(metrics)[:60000]}\nACTIVIDADES:\n{dumps(acts)[:20000]}"
-    msg = anthropic.Anthropic().messages.create(
-        model=MODEL, max_tokens=4000, system=SYSTEM, messages=[{"role": "user", "content": prompt}])
-    text = msg.content[0].text
+def ask(prompt: str) -> str:
+    if PROVIDER == "anthropic":
+        import anthropic
+        text = ask(prompt)
     res = json.loads(text[text.index("{"): text.rindex("}") + 1])
     db.execute("insert or replace into recommendations (day, today, upcoming, analysis) values (?, ?, ?, ?)",
                (date.today().isoformat(), dumps(res["today"]), dumps(res["upcoming"]), res["analysis"]))
