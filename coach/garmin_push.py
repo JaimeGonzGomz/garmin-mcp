@@ -104,3 +104,18 @@ def push(workout: dict, day: str, previous_id=None) -> dict:
         raise RuntimeError(f"Garmin no devolvio workoutId: {str(up)[:300]}")
     g.schedule_workout(wid, day)
     return {"workout_id": wid, "day": day}
+
+
+def send_today(db) -> dict:
+    """Envia a Garmin el entreno de hoy de la ultima recomendacion y lo registra. ValueError si no es enviable."""
+    import json
+    day = date.today().isoformat()
+    rec = db.execute("select data from reco where day = ?", (day,)).fetchone()
+    if not rec:
+        raise ValueError("No hay recomendacion de hoy; pulsa 'Actualizar ahora'.")
+    w = build_workout(json.loads(rec["data"]).get("today") or {}, day)
+    prev = db.execute("select workout_id from sent where day = ?", (day,)).fetchone()
+    r = push(w, day, prev["workout_id"] if prev else None)
+    db.execute("insert or replace into sent (day, workout_id, name) values (?, ?, ?)", (day, str(r["workout_id"]), w["workoutName"]))
+    db.commit()
+    return {**r, "name": w["workoutName"], "ok": True}

@@ -146,6 +146,7 @@ function hoy() {
   <div class="card">
     <div class="row"><h2 style="margin:0">${esc(t.titulo)}</h2> ${chip(t.intensidad)}</div>
     <div class="muted">${esc(t.tipo)} · ${num(t.duracion_min)} min${t.distancia_km ? " · " + num(t.distancia_km, 1) + " km" : ""}</div>
+    ${t.fc_objetivo || t.ritmo_objetivo ? `<div style="margin:4px 0"><b>FC esperada:</b> ${esc(t.fc_objetivo || "—")} lpm · <b>Ritmo esperado:</b> ${esc(t.ritmo_objetivo || "—")} /km</div>` : ""}
     <ol class="steps">${steps}</ol>
     <div><b>Por qué:</b> ${esc(t.motivo)}</div>
     ${canSend ? `<p class="row"><button class="btn" onclick="sendWorkout()">${sent ? "Reenviar a mi Garmin" : "Enviar a mi Garmin"}</button>
@@ -207,13 +208,13 @@ function estado() {
 function semana() {
   const r = D.reco;
   const up = r ? (r.upcoming || []).map(u => `<tr><td>${esc(u.day)}</td><td><b>${esc(u.titulo)}</b><div class="muted">${esc(u.notas)}</div></td>
-     <td>${esc(u.tipo)}</td><td>${num(u.duracion_min)} min${u.distancia_km ? "<br>" + num(u.distancia_km, 1) + " km" : ""}</td><td>${chip(u.intensidad)}</td></tr>`).join("") : "";
+     <td>${esc(u.tipo)}</td><td>${num(u.duracion_min)} min${u.distancia_km ? "<br>" + num(u.distancia_km, 1) + " km" : ""}</td><td>${esc(u.fc || "—")} lpm<br>${esc(u.ritmo || "—")}</td><td>${chip(u.intensidad)}</td></tr>`).join("") : "";
   const st = { COMPLETE: "hecho", NOT_COMPLETE: "", SKIPPED: "saltado" };
   const cal = D.calendar.map(c => `<tr${c.date === D.today ? ' style="font-weight:600"' : ""}><td>${esc(c.date)}</td>
      <td>${esc(c.title)}${c.long ? " ⟶" : ""}<div class="muted">${esc(c.desc)}</div></td><td>${esc(c.sport)}</td>
      <td>${c.min ? num(c.min) + " min" : ""}</td><td>${esc(st[c.status] ?? c.status ?? "")}</td></tr>`).join("");
   const pi = D.plan && D.plan.nombre ? `<div class="muted">${esc(D.plan.nombre)} · ${esc(D.plan.inicio)} → ${esc(D.plan.fin)} · ${esc(D.plan.semanas)} semanas</div>` : "";
-  return `<div class="card"><h2>Próximos 7 días (recomendado)</h2><table><tr><th>Día</th><th>Entreno</th><th>Tipo</th><th>Volumen</th><th>Intensidad</th></tr>${up || '<tr><td colspan=5>Sin datos</td></tr>'}</table></div>
+  return `<div class="card"><h2>Próximos 7 días (recomendado)</h2><table><tr><th>Día</th><th>Entreno</th><th>Tipo</th><th>Volumen</th><th>FC / ritmo</th><th>Intensidad</th></tr>${up || '<tr><td colspan=6>Sin datos</td></tr>'}</table></div>
   <div class="card"><h2>Plan de Garmin Coach</h2>${pi}<table><tr><th>Día</th><th>Entreno</th><th>Deporte</th><th>Duración</th><th>Estado</th></tr>${cal || '<tr><td colspan=5 class="muted">Nada programado o no se pudo leer.</td></tr>'}</table></div>`;
 }
 
@@ -263,6 +264,7 @@ function ajustes() {
    <label>Días de entreno por semana / disponibilidad</label><input id="s_days" value="${esc(s.days_week)}" style="width:100%" placeholder="p. ej. 5 días, largo el domingo">
    <label>Fuente de las zonas en la pestaña Estado</label>
    <select id="s_zsrc"><option value="garmin" ${s.zonas_fuente !== "manual" ? "selected" : ""}>Garmin (FC máx estimada por Garmin)</option><option value="manual" ${s.zonas_fuente === "manual" ? "selected" : ""}>Manual (los valores de abajo)</option></select>
+   <label><input type="checkbox" id="s_auto" ${s.auto_send === "1" ? "checked" : ""}> Enviar automáticamente al reloj el entreno de carrera de cada día (tras la recomendación diaria)</label>
    <label>Zonas manuales de FC (lpm)</label>
    <div class="row"><input id="s_hrmax" value="${esc(s.hr_max)}" placeholder="FC máx" size="8"><input id="s_hrrec" value="${esc(s.hr_recovery)}" placeholder="recup. &lt;" size="8">
    <input id="s_hrlong" value="${esc(s.hr_long)}" placeholder="TL &lt;" size="8"><input id="s_hreasy" value="${esc(s.hr_easy)}" placeholder="fácil &lt;" size="8"></div>
@@ -295,7 +297,7 @@ async function importLog() {
   const r = await api("/api/import_log", { text: t }); await load(); alert("Importadas " + r.lineas + " líneas");
 }
 async function saveSettings() {
-  await api("/api/settings", { goal_name: $("s_name").value, goal_date: $("s_date").value, days_week: $("s_days").value, context: $("s_ctx").value, milestones: $("s_ms").value, hr_max: $("s_hrmax").value, hr_recovery: $("s_hrrec").value, hr_long: $("s_hrlong").value, hr_easy: $("s_hreasy").value, zonas_fuente: $("s_zsrc").value, history: $("s_hist").value });
+  await api("/api/settings", { goal_name: $("s_name").value, goal_date: $("s_date").value, days_week: $("s_days").value, context: $("s_ctx").value, milestones: $("s_ms").value, hr_max: $("s_hrmax").value, hr_recovery: $("s_hrrec").value, hr_long: $("s_hrlong").value, hr_easy: $("s_hreasy").value, zonas_fuente: $("s_zsrc").value, auto_send: $("s_auto").checked ? "1" : "0", history: $("s_hist").value });
   await load(); $("saved") && ($("saved").textContent = "Guardado");
 }
 load();
