@@ -134,7 +134,13 @@ function hoy() {
   if (!r) return `<div class="card">Aún no hay recomendación. Pulsa <b>Actualizar ahora</b> (tarda ~1 minuto).</div>`;
   const t = r.today || {}, g = t.garmin_coach || {};
   const m = D.metrics[D.metrics.length - 1] || {};
-  const steps = (t.pasos || []).map(p => `<li><b>${esc(p.nombre)}</b>: ${esc(p.detalle)}</li>`).join("");
+  const tgt = o => !o || !o.tipo || o.tipo === "ninguno" ? "" : o.tipo === "fc" ? (o.min ? ` · FC ${num(o.min)}–${num(o.max)}` : ` · FC < ${num(o.max)}`) : ` · ritmo ${esc(o.min)}–${esc(o.max)}/km`;
+  const dur = p => p.duracion_min ? ` · ${p.duracion_min} min` : p.distancia_m ? ` · ${p.distancia_m} m` : p.distancia_km ? ` · ${p.distancia_km} km` : "";
+  const one = p => p.pasos && p.repeticiones ? `<li><b>${p.repeticiones} ×</b><ol class="steps">${p.pasos.map(one).join("")}</ol></li>`
+      : `<li><b>${esc(p.nombre)}</b>${dur(p)}${tgt(p.objetivo)}<div class="muted">${esc(p.detalle)}</div></li>`;
+  const steps = (t.pasos || []).map(one).join("");
+  const sent = D.sent && D.sent[D.today];
+  const canSend = ["running", "carrera", "correr", "run"].includes(String(t.tipo || "").toLowerCase());
   return `
   <div class="card"><div class="muted">${esc(r.day)} · fase: ${esc(r.fase)}</div><p style="margin:6px 0 0">${esc(r.resumen)}</p></div>
   <div class="card">
@@ -142,6 +148,8 @@ function hoy() {
     <div class="muted">${esc(t.tipo)} · ${num(t.duracion_min)} min${t.distancia_km ? " · " + num(t.distancia_km, 1) + " km" : ""}</div>
     <ol class="steps">${steps}</ol>
     <div><b>Por qué:</b> ${esc(t.motivo)}</div>
+    ${canSend ? `<p class="row"><button class="btn" onclick="sendWorkout()">${sent ? "Reenviar a mi Garmin" : "Enviar a mi Garmin"}</button>
+      <a href="#" onclick="previewWorkout();return false" class="muted">ver JSON</a> <span id="sendmsg" class="muted">${sent ? "Enviado: " + esc(sent.name) : ""}</span></p>` : ""}
   </div>
   <div class="card"><h3>Contraste con Garmin Coach ${chip(g.decision)}</h3>
     <div class="muted">Programado en Garmin hoy: ${D.calendar.filter(c => c.date === D.today).map(c => esc(c.title) + (c.desc ? " (" + esc(c.desc) + ")" : "") + (c.min ? " " + c.min + " min" : "")).join(" + ") || esc(g.planificado)}</div><div>${esc(g.comentario)}</div></div>
@@ -165,8 +173,9 @@ function estado() {
   const E = D.estado, X = (D.reco && D.reco.estado) || {}, est = X.estimaciones || {};
   const kpi = (t, v, sub) => `<div class="card"><div class="muted">${t}</div><div class="big">${v}</div><div class="muted">${sub || ""}</div></div>`;
   const v = E.vo2max, vol = E.volumen, hrv = E.hrv, c = E.carga;
-  const zon = E.zonas ? `<div class="card"><h3>Ritmos reales por tus zonas de FC</h3><div class="muted">Mediana de tus carreras de ≥3 km, últimos 28 días frente a los 28 anteriores (min/km).</div>
-    <table><tr><th>Zona</th><th>FC</th><th>Ritmo</th><th>Antes</th><th>Cambio</th><th>Sesiones</th></tr>${E.zonas.map(z => `<tr><td>${esc(z.zona)}</td><td>${esc(z.fc)}</td><td><b>${pace(z.pace)}</b></td><td>${pace(z.pace_prev)}</td>
+  const Z = E.zonas;
+  const zon = Z ? `<div class="card"><h3>Ritmos reales por zona de FC</h3><div class="muted">Zonas de ${Z.fuente === "garmin" ? "Garmin" : "tus ajustes"}${Z.fc_max ? " (FC máx " + num(Z.fc_max) + ")" : ""}. Mediana de tus carreras de ≥3 km, últimos 28 días frente a los 28 anteriores (min/km).</div>
+    <table><tr><th>Zona</th><th>FC</th><th>Ritmo</th><th>Antes</th><th>Cambio</th><th>Sesiones</th></tr>${Z.zonas.map(z => `<tr><td>${esc(z.zona)}</td><td>${esc(z.fc)}</td><td><b>${pace(z.pace)}</b></td><td>${pace(z.pace_prev)}</td>
     <td>${z.pace && z.pace_prev ? (d => `<span style="color:var(--${d > 0 ? "ok" : "warn"})">${d > 0 ? "−" : "+"}${Math.abs(d)} s/km</span>`)(Math.round((z.pace_prev - z.pace) * 60)) : ""}</td><td>${z.n} <span class="muted">(antes ${z.n_prev})</span></td></tr>`).join("")}</table></div>`
     : `<div class="card muted">Para ver tus ritmos por zona, indica tus zonas de FC en <b>Ajustes</b>.</div>`;
   const objetivos = (X.ritmos_objetivo || []).length ? `<div class="card"><h3>Ritmos objetivo (coach)</h3><table>${X.ritmos_objetivo.map(r => `<tr><td>${esc(r.zona)}</td><td><b>${esc(r.ritmo)}</b></td><td>${esc(r.uso)}</td></tr>`).join("")}</table></div>` : "";
@@ -252,7 +261,9 @@ function ajustes() {
    <label>Objetivo</label><input id="s_name" value="${esc(s.goal_name)}" style="width:100%">
    <label>Fecha del objetivo</label><input id="s_date" type="date" value="${esc(s.goal_date)}">
    <label>Días de entreno por semana / disponibilidad</label><input id="s_days" value="${esc(s.days_week)}" style="width:100%" placeholder="p. ej. 5 días, largo el domingo">
-   <label>Zonas de FC (lpm)</label>
+   <label>Fuente de las zonas en la pestaña Estado</label>
+   <select id="s_zsrc"><option value="garmin" ${s.zonas_fuente !== "manual" ? "selected" : ""}>Garmin (FC máx estimada por Garmin)</option><option value="manual" ${s.zonas_fuente === "manual" ? "selected" : ""}>Manual (los valores de abajo)</option></select>
+   <label>Zonas manuales de FC (lpm)</label>
    <div class="row"><input id="s_hrmax" value="${esc(s.hr_max)}" placeholder="FC máx" size="8"><input id="s_hrrec" value="${esc(s.hr_recovery)}" placeholder="recup. &lt;" size="8">
    <input id="s_hrlong" value="${esc(s.hr_long)}" placeholder="TL &lt;" size="8"><input id="s_hreasy" value="${esc(s.hr_easy)}" placeholder="fácil &lt;" size="8"></div>
    <label>Hitos intermedios (10K, media maratón… con fechas)</label><textarea id="s_ms" style="min-height:60px">${esc(s.milestones)}</textarea>
@@ -263,6 +274,18 @@ function ajustes() {
    <p><button class="btn" onclick="saveSettings()">Guardar</button> <span id="saved" class="muted"></span></p></div>`;
 }
 
+async function sendWorkout() {
+  if (!confirm("Esto crea el entreno en tu cuenta de Garmin Connect y lo programa hoy (se sincroniza al reloj). ¿Enviar?")) return;
+  $("sendmsg").textContent = "Enviando…";
+  const r = await fetch("/api/send_workout", { method: "POST" });
+  const j = await r.json().catch(() => ({}));
+  if (r.ok) { $("sendmsg").textContent = "Enviado: " + j.name + ". Sincroniza el reloj."; await load(); }
+  else $("sendmsg").textContent = "Error: " + (j.detail || r.status);
+}
+async function previewWorkout() {
+  const r = await fetch("/api/preview_workout"); const j = await r.json();
+  alert(JSON.stringify(j, null, 1).slice(0, 3500));
+}
 async function addNote() {
   const t = $("note").value.trim(); if (!t) return;
   await api("/api/notes", { text: t }); await load();
@@ -272,7 +295,7 @@ async function importLog() {
   const r = await api("/api/import_log", { text: t }); await load(); alert("Importadas " + r.lineas + " líneas");
 }
 async function saveSettings() {
-  await api("/api/settings", { goal_name: $("s_name").value, goal_date: $("s_date").value, days_week: $("s_days").value, context: $("s_ctx").value, milestones: $("s_ms").value, hr_max: $("s_hrmax").value, hr_recovery: $("s_hrrec").value, hr_long: $("s_hrlong").value, hr_easy: $("s_hreasy").value, history: $("s_hist").value });
+  await api("/api/settings", { goal_name: $("s_name").value, goal_date: $("s_date").value, days_week: $("s_days").value, context: $("s_ctx").value, milestones: $("s_ms").value, hr_max: $("s_hrmax").value, hr_recovery: $("s_hrrec").value, hr_long: $("s_hrlong").value, hr_easy: $("s_hreasy").value, zonas_fuente: $("s_zsrc").value, history: $("s_hist").value });
   await load(); $("saved") && ($("saved").textContent = "Guardado");
 }
 load();

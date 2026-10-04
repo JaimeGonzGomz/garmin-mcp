@@ -29,12 +29,18 @@ referencia. Las molestias o lesiones recientes (contexto, registro, notas) condi
 Reglas: progresion de carga segura (no subir el volumen semanal mas de ~10%), semana de descarga cada 3-4 semanas,
 afinar hacia la carrera (fases base/desarrollo/especifica/taper segun semanas restantes). Si HRV baja, sueno malo o
 readiness bajo, recorta o descansa. Contrasta SIEMPRE el entreno de hoy con el que Garmin Coach tiene programado.
+PASO (se envia al reloj Garmin, asi que todo paso de carrera debe llevar duracion o distancia y objetivo):
+ {"tipo":"calentamiento|correr|recuperacion|enfriamiento|descanso","nombre":"...","detalle":"...",
+  "duracion_min":10  (o "distancia_m":1000),
+  "objetivo":{"tipo":"fc|ritmo|ninguno","min":..,"max":..}}   fc: bpm (min,max); ritmo: "m:ss" por km (min = el mas rapido).
+ Series: {"repeticiones":6,"pasos":[PASO,PASO]}. Rodajes fáciles y tiradas largas: objetivo por FC segun las zonas del usuario.
+ Para fuerza/descanso/bici: pasos solo descriptivos (nombre/detalle, sin objetivo).
 Responde SOLO con un JSON (en espanol) con esta forma exacta:
 {
  "fase": "base|desarrollo|especifica|taper",
  "resumen": "2-3 frases con la conclusion del dia",
- "today": {"titulo","tipo","duracion_min","distancia_km","intensidad":"descanso|suave|moderada|fuerte",
-   "pasos":[{"nombre","detalle"}], "motivo",
+ "today": {"titulo","tipo":"running|fuerza|bici|descanso|otro","duracion_min","distancia_km","intensidad":"descanso|suave|moderada|fuerte",
+   "pasos":[PASO,...], "motivo",
    "garmin_coach": {"planificado":"que tiene programado Garmin hoy o 'nada'","decision":"seguir|modificar|sustituir|descanso","comentario"}},
  "upcoming": [{"day":"YYYY-MM-DD","titulo","tipo","duracion_min","distancia_km","intensidad","notas"} x7 dias siguientes],
  "analisis": {
@@ -129,7 +135,7 @@ def build_prompt(db) -> str:
         "volumen_semanal": weekly_volume(acts),
         "plan_garmin_info": plan_info(plans),
         "plan_garmin_entrenos": plan_tasks(plans, (today - timedelta(days=10)).isoformat(), (today + timedelta(days=14)).isoformat()),
-        "estado_calculado": calcular(metrics_long, acts, plans, st, get_extra(db, "race_predictions")),
+        "estado_calculado": calcular(metrics_long, acts, plans, st, get_extra(db, "race_predictions"), get_extra(db, "hr_zones")),
         "predicciones_carrera": (dumps(get_extra(db, "race_predictions"))[:2500]),
         "umbral_lactato": (dumps(get_extra(db, "lactate"))[:1500]),
         "resistencia": (dumps(get_extra(db, "endurance"))[:1500]),

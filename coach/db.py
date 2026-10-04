@@ -14,6 +14,7 @@ create table if not exists recommendations (
   day text primary key, today text, upcoming text, analysis text, created_at text default current_timestamp);
 create table if not exists reco (day text primary key, data text not null, created_at text default current_timestamp);
 create table if not exists extra (key text primary key, data text not null, updated text default current_timestamp);
+create table if not exists sent (day text primary key, workout_id text, name text, sent_at text default current_timestamp);
 create table if not exists settings (key text primary key, value text not null);
 create table if not exists log (id integer primary key autoincrement, day text, kind text, text text not null,
   created_at text default current_timestamp);
@@ -28,6 +29,7 @@ DEFAULTS = {
     "hr_recovery": "",
     "hr_long": "",
     "hr_easy": "",
+    "zonas_fuente": "garmin",
     "milestones": "",
     "history": "",
 }

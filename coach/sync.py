@@ -54,6 +54,7 @@ def sync(days: int = 7) -> None:
         "calendar": months,
         "race_predictions": safe(g.get_race_predictions),
         "lactate": safe(g.get_lactate_threshold),
+        "hr_zones": safe(g.connectapi, "/biometric-service/heartRateZones"),
         "endurance": safe(g.get_endurance_score, (t - timedelta(days=60)).isoformat(), t.isoformat()),
         "weigh_ins": safe(g.get_weigh_ins, (t - timedelta(days=60)).isoformat(), t.isoformat()),
     }
