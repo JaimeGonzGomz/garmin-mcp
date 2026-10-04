@@ -40,9 +40,10 @@ Responde SOLO con un JSON (en espanol) con esta forma exacta:
  "fase": "base|desarrollo|especifica|taper",
  "resumen": "2-3 frases con la conclusion del dia",
  "today": {"titulo","tipo":"running|fuerza|bici|descanso|otro","duracion_min","distancia_km","intensidad":"descanso|suave|moderada|fuerte",
+   "fc_objetivo":"rango o tope en lpm, p.ej. '<150' o '140-150'","ritmo_objetivo":"rango min/km orientativo, p.ej. '6:45-7:05'",
    "pasos":[PASO,...], "motivo",
    "garmin_coach": {"planificado":"que tiene programado Garmin hoy o 'nada'","decision":"seguir|modificar|sustituir|descanso","comentario"}},
- "upcoming": [{"day":"YYYY-MM-DD","titulo","tipo","duracion_min","distancia_km","intensidad","notas"} x7 dias siguientes],
+ "upcoming": [{"day":"YYYY-MM-DD","titulo","tipo","duracion_min","distancia_km","intensidad","fc":"lpm esperada","ritmo":"min/km esperado","notas"} x7 dias siguientes],
  "analisis": {
    "recuperacion": {"estado":"bien|atencion|mal","texto"},
    "sueno": {"estado","texto"}, "hrv": {"estado","texto"}, "carga": {"estado","texto"},
@@ -57,6 +58,9 @@ Responde SOLO con un JSON (en espanol) con esta forma exacta:
 }
 En "estado": usa estado_calculado (ritmos reales por zona, volumen, tendencias); las estimaciones de tiempos deben ser
 prudentes, justificadas con datos y marcadas con su confianza; si no hay datos suficientes di que no se puede estimar.
+OBLIGATORIO: todo entreno de carrera (hoy y los 7 dias de upcoming) lleva FC esperada y ritmo esperado en rangos concretos, coherentes
+con las zonas del usuario y con los ritmos reales por zona de estado_calculado (en rodajes y tiradas largas manda la FC; el ritmo es
+la consecuencia esperada, no el objetivo). Fuerza/descanso/bici: pon "—" en ritmo y, si procede, FC.
 Cada "texto" con cifras concretas de los datos (valores, comparacion con tu media, tendencia). Si falta un dato, dilo."""
 
 
@@ -89,20 +93,45 @@ def ask(prompt: str, model: str) -> str:
             raise RuntimeError(f"HTTP {e.code}: {detail}")
 
 
+RUN = ("running", "carrera", "correr", "run")
+
+
+def missing_targets(res: dict) -> list[str]:
+    """Entrenos de carrera sin FC o ritmo esperados (hoy y proximos dias)."""
+    bad = []
+    t = res.get("today") or {}
+    if str(t.get("tipo", "")).lower() in RUN and not (t.get("fc_objetivo") and t.get("ritmo_objetivo")):
+        bad.append("hoy")
+    for u in res.get("upcoming") or []:
+        if str(u.get("tipo", "")).lower() in RUN and not (u.get("fc") and u.get("ritmo")):
+            bad.append(str(u.get("day", "?")))
+    return bad
+
+
 def generate(prompt: str) -> dict:
-    errors = []
+    errors, best = [], None
     for model in MODELS:
         try:
             text = ask(prompt, model)
             res = json.loads(text[text.index("{"): text.rindex("}") + 1])
             for k in ("today", "upcoming", "analisis"):
                 res[k]
+            falta = missing_targets(res)
+            if falta:
+                print("fallo -> %s: faltan FC/ritmo en %s" % (model, ", ".join(falta)))
+                errors.append(f"{model}: faltan FC/ritmo en {', '.join(falta)}")
+                if best is None or len(falta) < best[0]:
+                    best = (len(falta), res, model)
+                continue
             print("modelo usado:", model)
             return res
         except Exception as e:
             msg = f"{model}: {type(e).__name__}: {e}"
             print("fallo ->", msg)
             errors.append(msg)
+    if best:  # ningun modelo cumplio todo: usar el que menos le faltaba
+        print(f"aviso: usando {best[2]} aunque faltan FC/ritmo en {best[0]} entrenos")
+        return best[1]
     raise SystemExit("Todos los modelos fallaron:\n" + "\n".join(errors))
 
 
@@ -152,6 +181,12 @@ def main() -> None:
     db.execute("insert into log (day, kind, text) values (?, 'coach', ?)", (today, str(res.get("log_entry") or res.get("resumen", ""))))
     db.commit()
     print("recomendacion guardada")
+    if get_settings(db).get("auto_send") == "1":
+        try:
+            from coach.garmin_push import send_today
+            print("enviado al reloj:", send_today(db)["name"])
+        except Exception as e:  # no bloquear la recomendacion si Garmin falla
+            print("aviso: no se pudo enviar al reloj:", e)
 
 
 if __name__ == "__main__":

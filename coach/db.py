@@ -30,6 +30,7 @@ DEFAULTS = {
     "hr_long": "",
     "hr_easy": "",
     "zonas_fuente": "garmin",
+    "auto_send": "0",
     "milestones": "",
     "history": "",
 }
