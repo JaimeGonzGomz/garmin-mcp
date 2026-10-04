@@ -11,7 +11,7 @@ import urllib.request
 from datetime import date, timedelta
 
 from coach.db import conn, dumps, get_extra, get_settings
-from coach.digest import activity_digest, calendar_digest, day_digest, weekly_volume
+from coach.digest import activity_digest, calendar_digest, compact, day_digest, weekly_volume
 
 PROVIDER = os.getenv("COACH_PROVIDER", "gemini")
 DEFAULT_MODELS = "claude-sonnet-5-5" if PROVIDER == "anthropic" else (
@@ -114,6 +114,7 @@ def build_prompt(db) -> str:
         "actividades_recientes": acts[-30:],
         "volumen_semanal": weekly_volume(acts),
         "plan_garmin_calendario": plan,
+        "plan_garmin_detalle": dumps(compact(get_extra(db, "garmin_plans")))[:9000],
         "predicciones_carrera": (dumps(get_extra(db, "race_predictions"))[:2500]),
         "umbral_lactato": (dumps(get_extra(db, "lactate"))[:1500]),
         "resistencia": (dumps(get_extra(db, "endurance"))[:1500]),

@@ -57,6 +57,14 @@ def sync(days: int = 7) -> None:
         "endurance": safe(g.get_endurance_score, (t - timedelta(days=60)).isoformat(), t.isoformat()),
         "weigh_ins": safe(g.get_weigh_ins, (t - timedelta(days=60)).isoformat(), t.isoformat()),
     }
+    plans = {}
+    for m in months:
+        for it in (m or {}).get("calendarItems") or []:
+            pid = it.get("trainingPlanId")
+            if pid and str(pid) not in plans:
+                plans[str(pid)] = safe(g.get_adaptive_training_plan_by_id, pid) if "ADAPTIVE" in str(it.get("tpType")) \
+                    else safe(g.get_training_plan_by_id, pid)
+    extras["garmin_plans"] = plans or None
     for k, v in extras.items():
         if v is not None:
             db.execute("insert or replace into extra (key, data, updated) values (?, ?, current_timestamp)", (k, dumps(v)))

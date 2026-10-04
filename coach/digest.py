@@ -1,7 +1,7 @@
 """Resumenes compactos de los datos crudos de Garmin (para la web y para el prompt)."""
 import json
 from collections import deque
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta  # noqa
 
 RUN_TYPES = {"running", "trail_running", "treadmill_running", "track_running", "virtual_run"}
 
@@ -99,7 +99,7 @@ def weekly_volume(acts: list[dict], weeks: int = 12) -> list[dict]:
 
 def calendar_digest(months: list[dict], start: str, end: str) -> list[dict]:
     """Entrenos programados en el calendario de Garmin (incluye Garmin Coach) entre dos fechas."""
-    items = []
+    items, seen = [], set()
     for m in months:
         for it in (m or {}).get("calendarItems") or []:
             d = it.get("date")
@@ -108,13 +108,35 @@ def calendar_digest(months: list[dict], start: str, end: str) -> list[dict]:
             kind = str(it.get("itemType") or "")
             if "workout" not in kind.lower() and not it.get("workoutId"):
                 continue
+            key = it.get("id") or (d, it.get("title"))
+            if key in seen:
+                continue
+            seen.add(key)
             items.append({k: v for k, v in list(it.items()) if isinstance(v, (str, int, float)) and v != ""}
                          | {"date": d})
     return sorted(items, key=lambda x: x["date"])
 
 
+def compact(o, depth=0):
+    """Reduce un JSON grande a lo esencial (sin ids/uuid, listas y textos recortados)."""
+    if isinstance(o, dict):
+        return {k: compact(v, depth + 1) for k, v in o.items()
+                if depth < 7 and not (k.lower().endswith(("uuid", "id")) and not isinstance(v, (dict, list)))}
+    if isinstance(o, list):
+        return [compact(v, depth + 1) for v in o[:60]]
+    return o[:200] if isinstance(o, str) else o
+
+
 if __name__ == "__main__":  # python -m coach.digest -> ultimo dia, para comprobar que campos se rellenan
     from coach.db import conn
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "plan":
+        from coach.db import get_extra
+        plans = get_extra(conn(), "garmin_plans") or {}
+        for pid, pl in plans.items():
+            print("PLAN", pid, "claves:", list(pl) if isinstance(pl, dict) else type(pl))
+            print(json.dumps(compact(pl), ensure_ascii=False)[:3000])
+        sys.exit()
     r = conn().execute("select day, data from daily_metrics order by day desc limit 1").fetchone()
     if r:
         print(r["day"], json.dumps(day_digest(json.loads(r["data"])), indent=1, ensure_ascii=False))
