@@ -11,6 +11,7 @@ import urllib.request
 from datetime import date, timedelta
 
 from coach.db import conn, dumps, get_extra, get_settings
+from coach.estado import calcular
 from coach.digest import activity_digest, day_digest, plan_info, plan_tasks, weekly_volume
 
 PROVIDER = os.getenv("COACH_PROVIDER", "gemini")
@@ -41,9 +42,15 @@ Responde SOLO con un JSON (en espanol) con esta forma exacta:
    "sueno": {"estado","texto"}, "hrv": {"estado","texto"}, "carga": {"estado","texto"},
    "progreso_objetivo": {"estado","texto"}, "semana": {"estado","texto"},
    "riesgos": ["..."], "recomendaciones": ["..."]},
+ "estado": {"resumen":"overview de 2-3 frases de la forma actual",
+   "estimaciones":{"vo2max":"tu lectura del VO2max (Garmin suele sobreestimar si el contexto lo dice)","maraton_ritmo":"min/km objetivo razonable hoy","maraton_tiempo":"h:mm","media_tiempo":"h:mm","10k_tiempo":"mm:ss","5k_tiempo":"mm:ss","confianza":"baja|media|alta","base":"en que datos te basas"},
+   "ritmos_objetivo":[{"zona","ritmo":"m:ss/km","uso":"para que sesiones"}],
+   "recomendaciones_generales":["3-6 recomendaciones de fondo para las proximas semanas"]},
  "preguntas": ["datos que te faltan y cambiarian la recomendacion (lesiones, fisio, sesiones sin registrar, fechas de hitos)"],
  "log_entry": "una frase para el registro del dia"
 }
+En "estado": usa estado_calculado (ritmos reales por zona, volumen, tendencias); las estimaciones de tiempos deben ser
+prudentes, justificadas con datos y marcadas con su confianza; si no hay datos suficientes di que no se puede estimar.
 Cada "texto" con cifras concretas de los datos (valores, comparacion con tu media, tendencia). Si falta un dato, dilo."""
 
 
@@ -99,6 +106,8 @@ def build_prompt(db) -> str:
     since = (today - timedelta(days=21)).isoformat()
     metrics = [{"day": r["day"], **day_digest(json.loads(r["data"]))}
                for r in db.execute("select * from daily_metrics where day >= ? order by day", (since,))]
+    metrics_long = [{"day": r["day"], **day_digest(json.loads(r["data"]))}
+                    for r in db.execute("select * from daily_metrics order by day desc limit 60")][::-1]
     acts = [activity_digest(json.loads(r["data"]))
             for r in db.execute("select data from activities order by start_time")]
     plans = get_extra(db, "garmin_plans")
@@ -120,6 +129,7 @@ def build_prompt(db) -> str:
         "volumen_semanal": weekly_volume(acts),
         "plan_garmin_info": plan_info(plans),
         "plan_garmin_entrenos": plan_tasks(plans, (today - timedelta(days=10)).isoformat(), (today + timedelta(days=14)).isoformat()),
+        "estado_calculado": calcular(metrics_long, acts, plans, st, get_extra(db, "race_predictions")),
         "predicciones_carrera": (dumps(get_extra(db, "race_predictions"))[:2500]),
         "umbral_lactato": (dumps(get_extra(db, "lactate"))[:1500]),
         "resistencia": (dumps(get_extra(db, "endurance"))[:1500]),
