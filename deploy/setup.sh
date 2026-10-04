@@ -12,9 +12,9 @@ apt-get install -y python3 python3-venv python3-pip curl debian-keyring debian-a
 for s in apache2 nginx; do systemctl disable --now "$s" 2>/dev/null || true; done
 # Caddy
 if ! command -v caddy >/dev/null; then
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy.gpg
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy.list
-  sed -i 's#^deb #deb [signed-by=/usr/share/keyrings/caddy.gpg] #' /etc/apt/sources.list.d/caddy.list
+  rm -f /etc/apt/sources.list.d/caddy.list /usr/share/keyrings/caddy.gpg
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
   apt-get update && apt-get install -y caddy
 fi
 cat > /etc/caddy/Caddyfile <<CADDY
