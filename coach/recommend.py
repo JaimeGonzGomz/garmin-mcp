@@ -11,7 +11,7 @@ import urllib.request
 from datetime import date, timedelta
 
 from coach.db import conn, dumps, get_extra, get_settings
-from coach.digest import activity_digest, calendar_digest, compact, day_digest, weekly_volume
+from coach.digest import activity_digest, day_digest, plan_info, plan_tasks, weekly_volume
 
 PROVIDER = os.getenv("COACH_PROVIDER", "gemini")
 DEFAULT_MODELS = "claude-sonnet-5-5" if PROVIDER == "anthropic" else (
@@ -21,7 +21,7 @@ MODELS = [m.strip() for m in (os.getenv("COACH_MODEL") or DEFAULT_MODELS).split(
 SYSTEM = """Eres un entrenador de running experto y prudente. Preparas al usuario para su maraton objetivo.
 Recibes JSON con: objetivo y semanas restantes, contexto del usuario (plan/historial de otro proyecto), registro
 reciente, metricas diarias de Garmin (HRV, sueno, readiness, carga, FC reposo, Body Battery), actividades recientes,
-volumen semanal, el calendario de entrenos de Garmin (incluye Garmin Coach) y predicciones de carrera.
+volumen semanal, el plan de Garmin Coach (info, y entrenos de los ultimos 10 dias con su estado de cumplimiento y de los proximos 14) y predicciones de carrera.
 Reglas: progresion de carga segura (no subir el volumen semanal mas de ~10%), semana de descarga cada 3-4 semanas,
 afinar hacia la carrera (fases base/desarrollo/especifica/taper segun semanas restantes). Si HRV baja, sueno malo o
 readiness bajo, recorta o descansa. Contrasta SIEMPRE el entreno de hoy con el que Garmin Coach tiene programado.
@@ -97,8 +97,7 @@ def build_prompt(db) -> str:
                for r in db.execute("select * from daily_metrics where day >= ? order by day", (since,))]
     acts = [activity_digest(json.loads(r["data"]))
             for r in db.execute("select data from activities order by start_time")]
-    cal = [c for c in (get_extra(db, "calendar") or [])]
-    plan = calendar_digest(cal, (today - timedelta(days=3)).isoformat(), (today + timedelta(days=14)).isoformat())
+    plans = get_extra(db, "garmin_plans")
     log = [dict(r) for r in db.execute("select day, kind, text from log order by id desc limit 30")][::-1]
     try:
         weeks_left = max(0, (date.fromisoformat(st["goal_date"]) - today).days // 7)
@@ -113,8 +112,8 @@ def build_prompt(db) -> str:
         "metricas_diarias": metrics,
         "actividades_recientes": acts[-30:],
         "volumen_semanal": weekly_volume(acts),
-        "plan_garmin_calendario": plan,
-        "plan_garmin_detalle": dumps(compact(get_extra(db, "garmin_plans")))[:9000],
+        "plan_garmin_info": plan_info(plans),
+        "plan_garmin_entrenos": plan_tasks(plans, (today - timedelta(days=10)).isoformat(), (today + timedelta(days=14)).isoformat()),
         "predicciones_carrera": (dumps(get_extra(db, "race_predictions"))[:2500]),
         "umbral_lactato": (dumps(get_extra(db, "lactate"))[:1500]),
         "resistencia": (dumps(get_extra(db, "endurance"))[:1500]),

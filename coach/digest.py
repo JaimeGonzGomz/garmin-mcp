@@ -117,6 +117,37 @@ def calendar_digest(months: list[dict], start: str, end: str) -> list[dict]:
     return sorted(items, key=lambda x: x["date"])
 
 
+def plan_tasks(plans: dict | None, start: str, end: str) -> list[dict]:
+    """Sesiones del plan de Garmin Coach entre dos fechas (formato plano)."""
+    out = []
+    for pl in (plans or {}).values():
+        for t in (pl or {}).get("taskList") or []:
+            d = t.get("calendarDate")
+            w = t.get("taskWorkout") or {}
+            if not d or not (start <= d <= end) or w.get("restDay"):
+                continue
+            secs = w.get("estimatedDurationInSecs")
+            out.append({
+                "date": d,
+                "title": w.get("workoutName"),
+                "desc": w.get("workoutDescription"),
+                "min": round(secs / 60) if isinstance(secs, (int, float)) else None,
+                "sport": (w.get("sportType") or {}).get("sportTypeKey"),
+                "effect": w.get("trainingEffectLabel") if w.get("trainingEffectLabel") != "INVALID" else None,
+                "status": w.get("adaptiveCoachingWorkoutStatus"),
+                "long": bool(t.get("longWkt")),
+            })
+    return sorted(out, key=lambda x: (x["date"], x["title"] or ""))
+
+
+def plan_info(plans: dict | None) -> dict:
+    for pl in (plans or {}).values():
+        return {"nombre": pl.get("name"), "inicio": (pl.get("startDate") or "")[:10], "fin": (pl.get("endDate") or "")[:10],
+                "semanas": pl.get("durationInWeeks"), "entrenos_semana": pl.get("avgWeeklyWorkouts"),
+                "fases": compact(pl.get("adaptivePlanPhases") or pl.get("planPhases"))}
+    return {}
+
+
 def compact(o, depth=0):
     """Reduce un JSON grande a lo esencial (sin ids/uuid, listas y textos recortados)."""
     if isinstance(o, dict):

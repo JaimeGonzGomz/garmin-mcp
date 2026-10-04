@@ -19,6 +19,7 @@
   nav button.on { color:var(--text); border-color:var(--accent); font-weight:600; }
   main { max-width:900px; margin:0 auto; padding:12px 16px 40px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin:12px 0; }
+  .card { overflow-x:auto; }
   .card h2, .card h3 { margin:0 0 6px; font-size:1.05em; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px; }
   .big { font-size:1.9em; font-weight:700; line-height:1.1; }
@@ -143,7 +144,7 @@ function hoy() {
     <div><b>Por qué:</b> ${esc(t.motivo)}</div>
   </div>
   <div class="card"><h3>Contraste con Garmin Coach ${chip(g.decision)}</h3>
-    <div class="muted">Programado en Garmin: ${esc(g.planificado)}</div><div>${esc(g.comentario)}</div></div>
+    <div class="muted">Programado en Garmin hoy: ${D.calendar.filter(c => c.date === D.today).map(c => esc(c.title) + (c.desc ? " (" + esc(c.desc) + ")" : "") + (c.min ? " " + c.min + " min" : "")).join(" + ") || esc(g.planificado)}</div><div>${esc(g.comentario)}</div></div>
   <div class="grid">
     <div class="card"><div class="muted">Readiness</div><div class="big">${num(m.readiness)}</div><div class="muted">${esc(m.readiness_level)}</div></div>
     <div class="card"><div class="muted">HRV anoche (ms)</div><div class="big">${num(m.hrv)}</div><div class="muted">media 7d ${num(m.hrv_weekly)} · ${esc(m.hrv_status)}</div></div>
@@ -159,10 +160,13 @@ function semana() {
   const r = D.reco;
   const up = r ? (r.upcoming || []).map(u => `<tr><td>${esc(u.day)}</td><td><b>${esc(u.titulo)}</b><div class="muted">${esc(u.notas)}</div></td>
      <td>${esc(u.tipo)}</td><td>${num(u.duracion_min)} min${u.distancia_km ? "<br>" + num(u.distancia_km, 1) + " km" : ""}</td><td>${chip(u.intensidad)}</td></tr>`).join("") : "";
-  const cal = D.calendar.map(c => `<tr><td>${esc(c.date)}</td><td>${esc(c.title || c.workoutName || c.itemType)}</td>
-     <td>${esc(c.sportTypeKey || c.sport || "")}</td><td>${c.duration ? num(c.duration / 60) + " min" : ""}${c.distance ? " " + num(c.distance / 1000, 1) + " km" : ""}</td></tr>`).join("");
+  const st = { COMPLETE: "hecho", NOT_COMPLETE: "", SKIPPED: "saltado" };
+  const cal = D.calendar.map(c => `<tr${c.date === D.today ? ' style="font-weight:600"' : ""}><td>${esc(c.date)}</td>
+     <td>${esc(c.title)}${c.long ? " ⟶" : ""}<div class="muted">${esc(c.desc)}</div></td><td>${esc(c.sport)}</td>
+     <td>${c.min ? num(c.min) + " min" : ""}</td><td>${esc(st[c.status] ?? c.status ?? "")}</td></tr>`).join("");
+  const pi = D.plan && D.plan.nombre ? `<div class="muted">${esc(D.plan.nombre)} · ${esc(D.plan.inicio)} → ${esc(D.plan.fin)} · ${esc(D.plan.semanas)} semanas</div>` : "";
   return `<div class="card"><h2>Próximos 7 días (recomendado)</h2><table><tr><th>Día</th><th>Entreno</th><th>Tipo</th><th>Volumen</th><th>Intensidad</th></tr>${up || '<tr><td colspan=5>Sin datos</td></tr>'}</table></div>
-  <div class="card"><h2>Calendario de Garmin (incluye Garmin Coach)</h2><table><tr><th>Día</th><th>Entreno</th><th>Deporte</th><th>Volumen</th></tr>${cal || '<tr><td colspan=4 class="muted">Nada programado o no se pudo leer.</td></tr>'}</table></div>`;
+  <div class="card"><h2>Plan de Garmin Coach</h2>${pi}<table><tr><th>Día</th><th>Entreno</th><th>Deporte</th><th>Duración</th><th>Estado</th></tr>${cal || '<tr><td colspan=5 class="muted">Nada programado o no se pudo leer.</td></tr>'}</table></div>`;
 }
 
 function analisis() {

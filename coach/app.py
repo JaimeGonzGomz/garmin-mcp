@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
 from coach.db import DATA, conn, get_extra, get_settings
-from coach.digest import activity_digest, calendar_digest, day_digest, weekly_volume
+from coach.digest import activity_digest, calendar_digest, day_digest, plan_info, plan_tasks, weekly_volume
 
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key=os.environ["SESSION_SECRET"], max_age=60 * 60 * 24 * 30,
@@ -79,8 +79,10 @@ def data():
     acts = [activity_digest(json.loads(r["data"]))
             for r in db.execute("select data from activities order by start_time")]
     rec = db.execute("select * from reco order by day desc limit 1").fetchone()
-    cal = calendar_digest(get_extra(db, "calendar") or [], (today - timedelta(days=7)).isoformat(),
-                          (today + timedelta(days=21)).isoformat())
+    a, b = (today - timedelta(days=7)).isoformat(), (today + timedelta(days=28)).isoformat()
+    plans = get_extra(db, "garmin_plans")
+    cal = plan_tasks(plans, a, b) or [{"date": c["date"], "title": c.get("title"), "sport": c.get("sportTypeKey")}
+                                      for c in calendar_digest(get_extra(db, "calendar") or [], a, b)]
     st = get_settings(db)
     try:
         days_left = (date.fromisoformat(st["goal_date"]) - today).days
@@ -95,6 +97,7 @@ def data():
         "activities": acts[-40:][::-1],
         "weekly": weekly_volume(acts),
         "calendar": cal,
+        "plan": plan_info(plans),
         "race_predictions": get_extra(db, "race_predictions"),
         "log": [dict(r) for r in db.execute("select id, day, kind, text from log order by id desc limit 150")],
         "refreshing": refreshing(),
