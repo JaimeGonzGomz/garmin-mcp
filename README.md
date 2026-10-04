@@ -27,4 +27,6 @@ Luego:
 3. Primera ejecucion: `cd /opt/garmin-coach && set -a && . ./.env && .venv/bin/python -m coach.sync 14 && .venv/bin/python -m coach.recommend`
 4. El DNS de contentaimaker.com (y www) debe apuntar a la IP del servidor.
 
+Comprobar que se rellenan las metricas: `cd /opt/garmin-coach && sudo .venv/bin/python -m coach.digest` (los campos `null` no se encontraron en los datos de Garmin).
+
 Actualizar: `bash /opt/garmin-coach/deploy/update.sh`. Se ejecuta solo cada dia a las 05:30 (systemd timer).
