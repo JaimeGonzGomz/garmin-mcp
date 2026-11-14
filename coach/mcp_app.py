@@ -18,13 +18,14 @@ MAX_CHARS = 60_000
 
 
 INSTRUCTIONS = (
-    "Datos de Garmin del usuario, de solo lectura: actividades, sueno, VFC, Body Battery, estres, carga, zonas y entrenos "
+    "Datos de Garmin del usuario (lectura, salvo send_workout si existe): actividades, sueno, VFC, Body Battery, estres, carga, zonas y entrenos "
     "programados. Las herramientas devuelven datos medidos o calculados, nunca recomendaciones tuyas. Cuando el usuario pida "
     "consejo de entrenamiento: 1) lee los datos que haga falta; 2) separa con claridad 'Lo que Garmin recomienda' (solo lo que "
     "Garmin aporta: entrenos programados, plan de Garmin Coach, readiness, estado de entrenamiento; si no hay nada, dilo y no "
     "lo inventes) de 'Mi recomendacion' (la tuya) y explica el porque citando las cifras concretas; 3) si ambas difieren, "
     "senala en que y cual elegirias. Para graficos usa metric_series y weekly_volume. No eres medico: ante dolor o sintomas, "
-    "recomienda consultar a un profesional."
+    "recomienda consultar a un profesional. Si existe send_workout, propon primero el entreno al usuario y solo lo envies "
+    "cuando el confirme (primero con confirm=false para la vista previa)."
 )
 
 @contextmanager
@@ -137,6 +138,34 @@ def scheduled_workouts(start_date: str | None = None, end_date: str | None = Non
 def training_plan() -> str:
     """Plan de entrenamiento activo en Garmin Coach: nombre, fechas, semanas, entrenos por semana y fases."""
     return out(gd.training_plan())
+
+
+# Escribir en Garmin solo si se activa en el .env (COACH_ENABLE_SEND=1): usa los tokens de garminconnect de esta instancia.
+# El conector publico no lo activa; con Business se sustituira por la Training API.
+ENABLE_SEND = os.getenv("COACH_ENABLE_SEND") == "1"
+
+if ENABLE_SEND:
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
+    def send_workout(name: str, date: str, steps: list[dict], description: str = "", confirm: bool = False) -> str:
+        """Crea un entreno de CARRERA estructurado en Garmin Connect y lo programa en `date` (YYYY-MM-DD, entre hoy y +60 dias);
+        se sincroniza con el reloj. Con confirm=false solo devuelve la vista previa: ensenasela al usuario y llama de nuevo con
+        confirm=true cuando el diga que si. Cada paso es un dict:
+          {"type": "warmup|run|recovery|rest|cooldown", "name": "...", "note": "...",
+           "duration_min": 10 | "distance_km": 1.0 | "distance_m": 400,        (uno de los tres)
+           "target": {"type": "hr", "min": 140, "max": 155}                       (lpm)
+                  o {"type": "pace", "min": "5:10", "max": "5:30"}                (min:seg por km)
+                  o {"type": "none"}}
+        Para repetir: {"repeat": 5, "steps": [ ...pasos... ]} (sin anidar). Maximo 40 pasos."""
+        from coach import garmin_push
+        w = garmin_push.workout_from_spec(name, date, steps, description)
+        if not confirm:
+            return out({"vista_previa": True, "nombre": w["workoutName"], "fecha": date, "pasos": steps,
+                        "siguiente": "Si el usuario confirma, llama de nuevo con confirm=true."})
+        try:
+            r = garmin_push.push(w, date)
+        except Exception as e:
+            raise RuntimeError(f"Garmin rechazo el entreno: {str(e)[:300]}") from e
+        return out({"enviado": True, "nombre": w["workoutName"], **r})
 
 
 @mcp.prompt(title="Garmin vs mi recomendacion")
