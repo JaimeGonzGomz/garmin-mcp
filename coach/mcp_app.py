@@ -17,6 +17,16 @@ HOST = PUBLIC_URL.split("://", 1)[-1]
 MAX_CHARS = 60_000
 
 
+INSTRUCTIONS = (
+    "Datos de Garmin del usuario, de solo lectura: actividades, sueno, VFC, Body Battery, estres, carga, zonas y entrenos "
+    "programados. Las herramientas devuelven datos medidos o calculados, nunca recomendaciones tuyas. Cuando el usuario pida "
+    "consejo de entrenamiento: 1) lee los datos que haga falta; 2) separa con claridad 'Lo que Garmin recomienda' (solo lo que "
+    "Garmin aporta: entrenos programados, plan de Garmin Coach, readiness, estado de entrenamiento; si no hay nada, dilo y no "
+    "lo inventes) de 'Mi recomendacion' (la tuya) y explica el porque citando las cifras concretas; 3) si ambas difieren, "
+    "senala en que y cual elegirias. Para graficos usa metric_series y weekly_volume. No eres medico: ante dolor o sintomas, "
+    "recomienda consultar a un profesional."
+)
+
 @contextmanager
 def _sin_env_en_cwd():
     """FastMCP (pydantic-settings) intenta leer ./.env; el servicio corre sin privilegios y ese archivo es de root.
@@ -32,9 +42,7 @@ def _sin_env_en_cwd():
 with _sin_env_en_cwd():
     mcp = FastMCP(
         "garmin-coach",
-        instructions=("Datos de Garmin del usuario (actividades, sueno, VFC, Body Battery, estres, carga, zonas, calendario). "
-                      "Las herramientas devuelven datos medidos, sin recomendaciones: el analisis, las recomendaciones y las graficas "
-                      "los hace el asistente. send_workout es la unica que escribe en Garmin."),
+        instructions=INSTRUCTIONS,
         auth_server_provider=Provider(),
         auth=AuthSettings(
             issuer_url=PUBLIC_URL,
@@ -121,7 +129,7 @@ def race_predictions() -> str:
 
 @mcp.tool(annotations=READ)
 def scheduled_workouts(start_date: str | None = None, end_date: str | None = None) -> str:
-    """Entrenos ya programados en Garmin (plan de Garmin Coach y calendario). Por defecto, desde hace 7 dias hasta dentro de 28."""
+    """Lo que Garmin tiene programado o recomendado: entrenos del plan de Garmin Coach y del calendario. Por defecto, desde hace 7 dias hasta dentro de 28."""
     return out(gd.scheduled_workouts(start_date, end_date))
 
 
@@ -131,24 +139,10 @@ def training_plan() -> str:
     return out(gd.training_plan())
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
-def send_workout(name: str, date: str, steps: list[dict], description: str = "", confirm: bool = False) -> str:
-    """Crea un entreno de CARRERA estructurado en Garmin Connect y lo programa en `date` (YYYY-MM-DD, entre hoy y +60 dias);
-    se sincroniza con el reloj. Con confirm=false solo devuelve la vista previa: ensenasela al usuario y llama de nuevo con
-    confirm=true cuando el diga que si. Cada paso es un dict:
-      {"type": "warmup|run|recovery|rest|cooldown", "name": "...", "note": "...",
-       "duration_min": 10 | "distance_km": 1.0 | "distance_m": 400,        (uno de los tres)
-       "target": {"type": "hr", "min": 140, "max": 155}                       (lpm)
-              o {"type": "pace", "min": "5:10", "max": "5:30"}                (min:seg por km)
-              o {"type": "none"}}
-    Para repetir: {"repeat": 5, "steps": [ ...pasos... ]} (sin anidar). Maximo 40 pasos."""
-    from coach import garmin_push
-    w = garmin_push.workout_from_spec(name, date, steps, description)
-    if not confirm:
-        return out({"vista_previa": True, "nombre": w["workoutName"], "fecha": date, "pasos": steps,
-                    "siguiente": "Si el usuario confirma, llama de nuevo con confirm=true."})
-    try:
-        r = garmin_push.push(w, date)
-    except Exception as e:
-        raise RuntimeError(f"Garmin rechazo el entreno: {str(e)[:300]}") from e
-    return out({"enviado": True, "nombre": w["workoutName"], **r})
+@mcp.prompt(title="Garmin vs mi recomendacion")
+def garmin_vs_recommendation(question: str = "Que deberia entrenar hoy?") -> str:
+    """Compara lo que Garmin recomienda con la recomendacion razonada del asistente."""
+    return (f"{question}\n\n"
+            "Usa las herramientas de Garmin: entrenos programados, resumen de entrenamiento, metricas de los "
+            "ultimos 14 dias y actividades recientes. Responde con tres apartados: 'Lo que Garmin recomienda', "
+            "'Mi recomendacion' y 'Por que' (con cifras).")
