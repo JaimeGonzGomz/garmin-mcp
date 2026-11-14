@@ -18,7 +18,38 @@ from coach.db import DATA, conn, get_extra, get_settings
 from coach.estado import calcular
 from coach.digest import activity_digest, calendar_digest, day_digest, plan_info, plan_tasks, weekly_volume
 
-app = FastAPI()
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)  # no publicar el mapa de la API
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    resp.headers.update({
+        "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+                                   "img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+        "Strict-Transport-Security": "max-age=31536000",
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "no-referrer",
+        "Cache-Control": resp.headers.get("Cache-Control", "no-store"),
+    })
+    return resp
+
+
+# Frena la fuerza bruta del login: max 5 fallos por IP y 30 en total cada 15 min.
+FAILS: dict[str, list[float]] = {}
+WINDOW, PER_IP, GLOBAL = 900, 5, 30
+
+
+def _throttled(ip: str) -> bool:
+    now = time.time()
+    for k in list(FAILS):
+        FAILS[k] = [t for t in FAILS[k] if now - t < WINDOW]
+        if not FAILS[k]:
+            del FAILS[k]
+    return len(FAILS.get(ip, [])) >= PER_IP or sum(map(len, FAILS.values())) >= GLOBAL
+
+
 app.add_middleware(SessionMiddleware, secret_key=os.environ["SESSION_SECRET"], max_age=60 * 60 * 24 * 30,
                    https_only=os.getenv("COACH_INSECURE_COOKIES") != "1")
 app.include_router(legal.router)
@@ -52,7 +83,11 @@ def index():
 
 @app.post("/api/login")
 def login(body: Login, request: Request):
-    if not hmac.compare_digest(body.password, os.environ["COACH_PASSWORD"]):
+    ip = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "?")
+    if _throttled(ip):
+        raise HTTPException(429, "Demasiados intentos; espera unos minutos")
+    if not hmac.compare_digest(body.password.encode(), os.environ["COACH_PASSWORD"].encode()):
+        FAILS.setdefault(ip, []).append(time.time())
         raise HTTPException(401, "Contrasena incorrecta")
     request.session["ok"] = True
     return {"ok": True}
