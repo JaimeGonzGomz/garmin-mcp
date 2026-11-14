@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
+from coach import legal
 from coach.db import DATA, conn, get_extra, get_settings
 from coach.estado import calcular
 from coach.digest import activity_digest, calendar_digest, day_digest, plan_info, plan_tasks, weekly_volume
@@ -20,6 +21,7 @@ from coach.digest import activity_digest, calendar_digest, day_digest, plan_info
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key=os.environ["SESSION_SECRET"], max_age=60 * 60 * 24 * 30,
                    https_only=os.getenv("COACH_INSECURE_COOKIES") != "1")
+app.include_router(legal.router)
 STATIC = Path(__file__).parent / "static"
 LOCK = DATA / "refresh.lock"
 ROOT = Path(__file__).resolve().parent.parent
