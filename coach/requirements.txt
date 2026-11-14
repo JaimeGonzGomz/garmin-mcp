@@ -3,3 +3,4 @@ anthropic
 fastapi
 uvicorn
 itsdangerous
+mcp<2

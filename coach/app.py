@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import time
+from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -13,12 +14,21 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
-from coach import legal
+from coach import legal, oauth
+from coach.mcp_app import mcp
+from coach.snapshot import build_snapshot
+from coach.throttle import client_ip, fail, throttled
 from coach.db import DATA, conn, get_extra, get_settings
 from coach.estado import calcular
 from coach.digest import activity_digest, calendar_digest, day_digest, plan_info, plan_tasks, weekly_volume
 
-app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)  # no publicar el mapa de la API
+@asynccontextmanager
+async def lifespan(_app):
+    async with mcp.session_manager.run():
+        yield
+
+
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)  # no publicar el mapa de la API
 
 
 @app.middleware("http")
@@ -36,23 +46,15 @@ async def security_headers(request: Request, call_next):
     return resp
 
 
-# Frena la fuerza bruta del login: max 5 fallos por IP y 30 en total cada 15 min.
-FAILS: dict[str, list[float]] = {}
-WINDOW, PER_IP, GLOBAL = 900, 5, 30
-
-
-def _throttled(ip: str) -> bool:
-    now = time.time()
-    for k in list(FAILS):
-        FAILS[k] = [t for t in FAILS[k] if now - t < WINDOW]
-        if not FAILS[k]:
-            del FAILS[k]
-    return len(FAILS.get(ip, [])) >= PER_IP or sum(map(len, FAILS.values())) >= GLOBAL
-
-
 app.add_middleware(SessionMiddleware, secret_key=os.environ["SESSION_SECRET"], max_age=60 * 60 * 24 * 30,
                    https_only=os.getenv("COACH_INSECURE_COOKIES") != "1")
 app.include_router(legal.router)
+app.include_router(oauth.router)
+# Conector MCP remoto: /mcp (protegido con OAuth) y los endpoints OAuth (/authorize, /token, /register, /.well-known/...)
+_mcp = mcp.streamable_http_app()
+app.router.routes.extend(_mcp.routes)
+for _m in reversed(_mcp.user_middleware):  # autenticacion Bearer del MCP (solo marca el usuario; /mcp la exige)
+    app.add_middleware(_m.cls, **_m.kwargs)
 STATIC = Path(__file__).parent / "static"
 LOCK = DATA / "refresh.lock"
 ROOT = Path(__file__).resolve().parent.parent
@@ -83,11 +85,11 @@ def index():
 
 @app.post("/api/login")
 def login(body: Login, request: Request):
-    ip = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "?")
-    if _throttled(ip):
+    ip = client_ip(request)
+    if throttled(ip):
         raise HTTPException(429, "Demasiados intentos; espera unos minutos")
     if not hmac.compare_digest(body.password.encode(), os.environ["COACH_PASSWORD"].encode()):
-        FAILS.setdefault(ip, []).append(time.time())
+        fail(ip)
         raise HTTPException(401, "Contrasena incorrecta")
     request.session["ok"] = True
     return {"ok": True}
@@ -110,38 +112,7 @@ def refreshing() -> bool:
 
 @app.get("/api/data", dependencies=[Depends(auth)])
 def data():
-    db = conn()
-    today = date.today()
-    metrics = [{"day": r["day"], **day_digest(json.loads(r["data"]))}
-               for r in db.execute("select * from daily_metrics order by day desc limit 60")][::-1]
-    acts = [activity_digest(json.loads(r["data"]))
-            for r in db.execute("select data from activities order by start_time")]
-    rec = db.execute("select * from reco order by day desc limit 1").fetchone()
-    a, b = (today - timedelta(days=7)).isoformat(), (today + timedelta(days=28)).isoformat()
-    plans = get_extra(db, "garmin_plans")
-    cal = plan_tasks(plans, a, b) or [{"date": c["date"], "title": c.get("title"), "sport": c.get("sportTypeKey")}
-                                      for c in calendar_digest(get_extra(db, "calendar") or [], a, b)]
-    st = get_settings(db)
-    try:
-        days_left = (date.fromisoformat(st["goal_date"]) - today).days
-    except ValueError:
-        days_left = None
-    return {
-        "today": today.isoformat(),
-        "settings": st,
-        "days_left": days_left,
-        "reco": rec and {"day": rec["day"], "created_at": rec["created_at"], **json.loads(rec["data"])},
-        "metrics": metrics,
-        "activities": acts[-40:][::-1],
-        "weekly": weekly_volume(acts),
-        "calendar": cal,
-        "plan": plan_info(plans),
-        "estado": calcular(metrics, acts, plans, st, get_extra(db, "race_predictions"), get_extra(db, "hr_zones")),
-        "race_predictions": get_extra(db, "race_predictions"),
-        "sent": {r["day"]: {"name": r["name"], "at": r["sent_at"]} for r in db.execute("select * from sent order by day desc limit 14")},
-        "log": [dict(r) for r in db.execute("select id, day, kind, text from log order by id desc limit 150")],
-        "refreshing": refreshing(),
-    }
+    return build_snapshot(refreshing())
 
 
 @app.post("/api/settings", dependencies=[Depends(auth)])
