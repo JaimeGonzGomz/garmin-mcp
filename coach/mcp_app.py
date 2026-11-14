@@ -2,6 +2,8 @@
 y una de escritura (anadir nota al registro)."""
 import json
 import os
+import tempfile
+from contextlib import contextmanager
 from datetime import date
 
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
@@ -16,22 +18,36 @@ PUBLIC_URL = os.getenv("COACH_PUBLIC_URL", "https://contentaimaker.com").rstrip(
 HOST = PUBLIC_URL.split("://", 1)[-1]
 MAX_CHARS = 60_000
 
-mcp = FastMCP(
-    "garmin-coach",
-    instructions="Datos de entrenamiento del usuario (Garmin) y la recomendacion diaria del coach. Solo lectura, salvo add_note.",
-    auth_server_provider=Provider(),
-    auth=AuthSettings(
-        issuer_url=PUBLIC_URL,
-        resource_server_url=f"{PUBLIC_URL}/mcp",
-        validate_token_resource=False,
-        required_scopes=[SCOPE],
-        client_registration_options=ClientRegistrationOptions(enabled=True, valid_scopes=[SCOPE], default_scopes=[SCOPE]),
-        revocation_options=RevocationOptions(enabled=True),
-    ),
-    stateless_http=True,
-    json_response=True,
-    transport_security=TransportSecuritySettings(allowed_hosts=[HOST, f"{HOST}:*"], allowed_origins=[PUBLIC_URL]),
-)
+
+@contextmanager
+def _sin_env_en_cwd():
+    """FastMCP (pydantic-settings) intenta leer ./.env; el servicio corre sin privilegios y ese archivo es de root.
+    Los secretos llegan por EnvironmentFile, asi que construimos FastMCP desde un directorio sin .env."""
+    prev = os.getcwd()
+    os.chdir(tempfile.gettempdir())
+    try:
+        yield
+    finally:
+        os.chdir(prev)
+
+
+with _sin_env_en_cwd():
+    mcp = FastMCP(
+        "garmin-coach",
+        instructions="Datos de entrenamiento del usuario (Garmin) y la recomendacion diaria del coach. Solo lectura, salvo add_note.",
+        auth_server_provider=Provider(),
+        auth=AuthSettings(
+            issuer_url=PUBLIC_URL,
+            resource_server_url=f"{PUBLIC_URL}/mcp",
+            validate_token_resource=False,
+            required_scopes=[SCOPE],
+            client_registration_options=ClientRegistrationOptions(enabled=True, valid_scopes=[SCOPE], default_scopes=[SCOPE]),
+            revocation_options=RevocationOptions(enabled=True),
+        ),
+        stateless_http=True,
+        json_response=True,
+        transport_security=TransportSecuritySettings(allowed_hosts=[HOST, f"{HOST}:*"], allowed_origins=[PUBLIC_URL]),
+    )
 
 
 def out(data) -> str:
