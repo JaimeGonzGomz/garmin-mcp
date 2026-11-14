@@ -114,11 +114,14 @@ input,button{font:inherit;padding:.5rem;width:100%;box-sizing:border-box;margin-
 </style></head><body><h1>Garmin Coach</h1>
 <p><b>__CLIENT__</b> quiere acceder a tus datos de entrenamiento (solo lectura). Escribe tu contrasena para permitirlo.</p>
 <input id="pw" type="password" autocomplete="current-password" autofocus>
+<p style="font-size:.9rem"><label><input id="ok" type="checkbox" style="width:auto;margin-right:.5rem">Doy mi consentimiento explicito para que
+el asistente de IA Claude (Anthropic) procese mis datos de Garmin cuando se lo pida. Puedo retirarlo en cualquier momento.
+He leido la <a href="/privacidad" target="_blank">politica de privacidad</a> y las <a href="/condiciones" target="_blank">condiciones de uso</a>.</label></p>
 <button onclick="go()">Permitir</button><p id="msg"></p>
 <script>
 async function go(){
   const r = await fetch("/oauth/login", {method:"POST", headers:{"content-type":"application/json"},
-    body: JSON.stringify({req: __REQ__, password: document.getElementById("pw").value})});
+    body: JSON.stringify({req: __REQ__, password: document.getElementById("pw").value, consent: document.getElementById("ok").checked})});
   const j = await r.json().catch(() => ({}));
   if (r.ok) location.href = j.redirect; else document.getElementById("msg").textContent = j.detail || "Error";
 }
@@ -139,6 +142,7 @@ def login_page(req: str):
 class LoginBody(BaseModel):
     req: str
     password: str
+    consent: bool = False
 
 
 @router.post("/oauth/login")
@@ -149,6 +153,8 @@ def login(body: LoginBody, request: Request):
     entry = PENDING.get(body.req)
     if not entry or entry[0] < time.time():
         raise HTTPException(400, "Solicitud caducada; vuelve a conectar desde claude.ai")
+    if not body.consent:
+        raise HTTPException(400, "Debes dar tu consentimiento para continuar")
     if not hmac.compare_digest(body.password.encode(), os.environ["COACH_PASSWORD"].encode()):
         fail(ip)
         raise HTTPException(401, "Contrasena incorrecta")
