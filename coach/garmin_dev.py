@@ -38,7 +38,9 @@ def callback(request: Request):
 
 
 @router.post("/garmin/push/{token}")
-async def push(token: str, request: Request):
+@router.post("/garmin/push/{token}/{kind}")
+async def push(token: str, request: Request, kind: str = "x"):
+    kind = "".join(c for c in kind if c.isalnum() or c in "-_")[:40] or "x"
     expected = os.environ.get("GARMIN_PUSH_TOKEN", "")
     if not expected or not hmac.compare_digest(token.encode(), expected.encode()):
         raise HTTPException(404)
@@ -46,7 +48,7 @@ async def push(token: str, request: Request):
     if len(body) > MAX_BODY:
         raise HTTPException(413)
     DIR.mkdir(parents=True, exist_ok=True)
-    (DIR / f"push-{time.time_ns()}.json").write_bytes(body)
+    (DIR / f"push-{kind}-{time.time_ns()}.json").write_bytes(body)
     return {}
 
 
