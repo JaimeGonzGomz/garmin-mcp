@@ -87,7 +87,8 @@ def calcular(metrics, acts, plans, st, race_predictions=None, hr_zones=None):
     last_run = max((_d(x) for x in runs), default=None)
     tasks = plan_tasks(plans, (today - timedelta(days=14)).isoformat(), (today - timedelta(days=1)).isoformat())
     done = sum(1 for t in tasks if t["status"] == "COMPLETE")
-    L = metrics[-1] if metrics else {}
+    # el ultimo dia puede venir incompleto (p. ej. aun sin readiness): usamos el ultimo valor disponible de cada metrica
+    L = {k: next((m[k] for m in reversed(metrics[-14:]) if m.get(k) is not None), None) for k in (metrics[-1] if metrics else {})}
     return {
         "vo2max": {"actual": L.get("vo2max"), "hace_30d": _back(metrics, "vo2max", 30), "hace_60d": _back(metrics, "vo2max", 60)},
         "rhr": {"ult7": _avg([m["rhr"] for m in metrics[-7:]]), "prev21": _avg([m["rhr"] for m in metrics[-28:-7]])},
