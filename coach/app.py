@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
-from coach import legal, oauth
+from coach import garmin_dev, legal, oauth
 from coach.mcp_app import mcp
 from coach.snapshot import build_snapshot
 from coach.throttle import client_ip, fail, throttled
@@ -50,6 +50,7 @@ app.add_middleware(SessionMiddleware, secret_key=os.environ["SESSION_SECRET"], m
                    https_only=os.getenv("COACH_INSECURE_COOKIES") != "1")
 app.include_router(legal.router)
 app.include_router(oauth.router)
+app.include_router(garmin_dev.router)
 # Conector MCP remoto: /mcp (protegido con OAuth) y los endpoints OAuth (/authorize, /token, /register, /.well-known/...)
 _mcp = mcp.streamable_http_app()
 app.router.routes.extend(_mcp.routes)
