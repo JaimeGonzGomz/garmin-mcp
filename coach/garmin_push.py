@@ -1,6 +1,6 @@
 """Convierte el entreno de hoy (pasos estructurados del coach) en un entreno de Garmin y lo programa."""
 import re
-from datetime import date
+from datetime import date, timedelta
 
 from garminconnect import Garmin
 
@@ -119,3 +119,66 @@ def send_today(db) -> dict:
     db.execute("insert or replace into sent (day, workout_id, name) values (?, ?, ?)", (day, str(r["workout_id"]), w["workoutName"]))
     db.commit()
     return {**r, "name": w["workoutName"], "ok": True}
+
+
+# --- Entrenos descritos desde el conector MCP (nombres en ingles, validados) ---
+KINDS = {"warmup": "calentamiento", "run": "correr", "recovery": "recuperacion", "rest": "descanso", "cooldown": "enfriamiento"}
+TARGETS = {"hr": "fc", "pace": "ritmo", "none": "ninguno"}
+
+
+def _spec_steps(steps, depth=0, count=None):
+    count = count if count is not None else [0]
+    out = []
+    for s in steps:
+        count[0] += 1
+        if count[0] > 40:
+            raise ValueError("Demasiados pasos (maximo 40)")
+        if s.get("repeat"):
+            if depth:
+                raise ValueError("No se admiten repeticiones anidadas")
+            n = int(s["repeat"])
+            if not 1 <= n <= 50 or not s.get("steps"):
+                raise ValueError("repeat debe ser 1-50 y llevar 'steps'")
+            out.append({"repeticiones": n, "pasos": _spec_steps(s["steps"], depth + 1, count)})
+            continue
+        kind = KINDS.get(str(s.get("type", "run")).lower())
+        if not kind:
+            raise ValueError(f"type desconocido: {s.get('type')}. Validos: {sorted(KINDS)} o un grupo con repeat")
+        p = {"tipo": kind, "nombre": s.get("name", ""), "detalle": s.get("note", "")}
+        has_end = False
+        for src, dst, lim in (("duration_min", "duracion_min", 360), ("distance_km", "distancia_km", 60), ("distance_m", "distancia_m", 60000)):
+            if s.get(src) is not None:
+                v = float(s[src])
+                if not 0 < v <= lim:
+                    raise ValueError(f"{src} fuera de rango (0-{lim})")
+                p[dst], has_end = v, True
+        if not has_end:
+            raise ValueError("Cada paso necesita duration_min, distance_km o distance_m")
+        t = s.get("target") or {"type": "none"}
+        tt = TARGETS.get(str(t.get("type", "none")).lower())
+        if tt is None:
+            raise ValueError("target.type debe ser hr, pace o none")
+        if tt == "fc":
+            lo, hi = float(t.get("min") or 0), float(t.get("max") or 0)
+            if not (60 <= lo < hi <= 230):
+                raise ValueError("target hr: min < max, entre 60 y 230 lpm")
+            p["objetivo"] = {"tipo": "fc", "min": lo, "max": hi}
+        elif tt == "ritmo":
+            a, b = _secs(t.get("min")), _secs(t.get("max"))
+            if not a or not b or not all(120 <= x <= 720 for x in (a, b)):
+                raise ValueError("target pace: 'm:ss' por km, entre 2:00 y 12:00")
+            p["objetivo"] = {"tipo": "ritmo", "min": t["min"], "max": t["max"]}
+        out.append(p)
+    if not out:
+        raise ValueError("El entreno no tiene pasos")
+    return out
+
+
+def workout_from_spec(name: str, day: str, steps: list[dict], description: str = "") -> dict:
+    d = date.fromisoformat(day)
+    if not date.today() <= d <= date.today() + timedelta(days=60):
+        raise ValueError("La fecha debe ser entre hoy y dentro de 60 dias")
+    if not name.strip():
+        raise ValueError("Falta el nombre del entreno")
+    pasos = _spec_steps(steps)
+    return build_workout({"tipo": "running", "pasos": pasos, "titulo": name.strip()[:40], "motivo": description}, day)

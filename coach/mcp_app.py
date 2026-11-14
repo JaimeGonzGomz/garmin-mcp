@@ -1,18 +1,16 @@
-"""Servidor MCP remoto (streamable HTTP) con OAuth. Herramientas de lectura sobre la base de datos del coach
-y una de escritura (anadir nota al registro)."""
+"""Servidor MCP remoto (streamable HTTP) con OAuth: datos de Garmin en bruto (solo lectura) y envio de entrenos."""
 import json
 import os
 import tempfile
 from contextlib import contextmanager
-from datetime import date
 
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import ToolAnnotations
 
-from coach.db import conn
+from coach import garmin_data as gd
 from coach.oauth import SCOPE, Provider
-from coach.snapshot import build_snapshot
 
 PUBLIC_URL = os.getenv("COACH_PUBLIC_URL", "https://contentaimaker.com").rstrip("/")
 HOST = PUBLIC_URL.split("://", 1)[-1]
@@ -34,7 +32,9 @@ def _sin_env_en_cwd():
 with _sin_env_en_cwd():
     mcp = FastMCP(
         "garmin-coach",
-        instructions="Datos de entrenamiento del usuario (Garmin) y la recomendacion diaria del coach. Solo lectura, salvo add_note.",
+        instructions=("Datos de Garmin del usuario (actividades, sueno, VFC, Body Battery, estres, carga, zonas, calendario). "
+                      "Las herramientas devuelven datos medidos, sin recomendaciones: el analisis, las recomendaciones y las graficas "
+                      "los hace el asistente. send_workout es la unica que escribe en Garmin."),
         auth_server_provider=Provider(),
         auth=AuthSettings(
             issuer_url=PUBLIC_URL,
@@ -50,64 +50,105 @@ with _sin_env_en_cwd():
     )
 
 
+READ = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
+
+
 def out(data) -> str:
     text = json.dumps(data, ensure_ascii=False, default=str)
     return text if len(text) <= MAX_CHARS else text[:MAX_CHARS] + "...[recortado]"
 
 
-@mcp.tool()
-def today_recommendation() -> str:
-    """Recomendacion del coach para hoy (sesion, FC y ritmo esperados) y su fecha."""
-    return out(build_snapshot()["reco"])
+@mcp.tool(annotations=READ)
+def activities(start_date: str | None = None, end_date: str | None = None, activity_type: str | None = None, limit: int = 30) -> str:
+    """Actividades (mas recientes primero) entre dos fechas YYYY-MM-DD (por defecto, ultimos 30 dias). activity_type opcional:
+    running, cycling, strength_training... Cada una trae km, min, ritmo (min/km), FC media y maxima, efecto de
+    entrenamiento aerobico/anaerobico, carga, cadencia, desnivel, potencia y minutos en cada zona de FC. Maximo 100."""
+    return out(gd.activities(start_date, end_date, activity_type, limit))
 
 
-@mcp.tool()
-def training_status() -> str:
-    """Estado actual: ritmos reales por zona, volumen, tendencias y dias hasta el objetivo."""
-    s = build_snapshot()
-    return out({"days_left": s["days_left"], "goal": s["settings"].get("goal_name"), "estado": s["estado"],
-                "race_predictions": s["race_predictions"], "plan": s["plan"]})
+@mcp.tool(annotations=READ)
+def activity_detail(activity_id: int) -> str:
+    """Datos completos de una actividad concreta (el id sale de `activities`), tal como los devuelve Garmin."""
+    d = gd.activity_detail(activity_id)
+    return out(d) if d else "Actividad no encontrada"
 
 
-@mcp.tool()
-def recent_activities(limit: int = 15) -> str:
-    """Ultimas actividades (resumen por actividad), de la mas reciente a la mas antigua. Maximo 40."""
-    return out(build_snapshot()["activities"][: max(1, min(limit, 40))])
+@mcp.tool(annotations=READ)
+def daily_metrics(start_date: str | None = None, end_date: str | None = None) -> str:
+    """Una fila por dia entre dos fechas (por defecto, ultimos 14 dias): VFC (y su rango base), sueno (horas, puntuacion,
+    fases), FC en reposo, Body Battery, estres, pasos, minutos de intensidad, readiness, carga aguda/cronica, ACWR,
+    estado de entrenamiento y VO2max."""
+    return out(gd.daily(start_date, end_date))
 
 
-@mcp.tool()
-def daily_metrics(days: int = 14) -> str:
-    """Metricas diarias (sueno, VFC, Body Battery, FC en reposo...) de los ultimos dias. Maximo 60."""
-    return out(build_snapshot()["metrics"][-max(1, min(days, 60)):])
+@mcp.tool(annotations=READ, description=(
+    "Series temporales listas para graficar: devuelve {days:[...], series:{metrica:[valores]}}. "
+    f"Metricas disponibles: {', '.join(gd.METRICS)}. Fechas YYYY-MM-DD (por defecto, ultimos 14 dias)."))
+def metric_series(metrics: list[str], start_date: str | None = None, end_date: str | None = None) -> str:
+    return out(gd.series(metrics, start_date, end_date))
 
 
-@mcp.tool()
-def weekly_volume() -> str:
-    """Volumen semanal de las ultimas semanas."""
-    return out(build_snapshot()["weekly"])
+@mcp.tool(annotations=READ)
+def weekly_volume(weeks: int = 12) -> str:
+    """Kilometros, minutos y numero de carreras por semana (lunes) de las ultimas semanas. Maximo 52."""
+    return out(gd.weekly(weeks))
 
 
-@mcp.tool()
-def upcoming_calendar() -> str:
-    """Sesiones programadas desde hace una semana hasta dentro de cuatro."""
-    return out(build_snapshot()["calendar"])
+@mcp.tool(annotations=READ)
+def training_summary() -> str:
+    """Resumen calculado sobre los datos (sin IA): VO2max, FC en reposo, VFC, sueno, carga, cambio de volumen en 14 dias,
+    tirada larga reciente, dias sin correr y ritmo real por zona de FC."""
+    return out(gd.summary())
 
 
-@mcp.tool()
-def log_entries(limit: int = 30) -> str:
-    """Notas y entradas del registro del entrenamiento, las mas recientes primero. Maximo 150."""
-    return out(build_snapshot()["log"][: max(1, min(limit, 150))])
+@mcp.tool(annotations=READ)
+def pace_by_hr_zone() -> str:
+    """Ritmo medio real (min/km) por zona de FC en los ultimos 28 dias frente a los 28 anteriores."""
+    return out(gd.pace_by_hr_zone())
 
 
-@mcp.tool()
-def add_note(text: str, day: str | None = None) -> str:
-    """Anade una nota al registro (sensaciones, molestias, resultado del fisio...). day opcional YYYY-MM-DD."""
-    text = text.strip()
-    if not text:
-        return "Nota vacia"
-    if len(text) > 2000:
-        return "Nota demasiado larga (max 2000 caracteres)"
-    db = conn()
-    db.execute("insert into log (day, kind, text) values (?, 'nota', ?)", (day or date.today().isoformat(), text))
-    db.commit()
-    return "Nota guardada"
+@mcp.tool(annotations=READ)
+def hr_zones() -> str:
+    """Zonas de frecuencia cardiaca configuradas en Garmin (suelo de cada zona, FC maxima y en reposo)."""
+    return out(gd.hr_zones())
+
+
+@mcp.tool(annotations=READ)
+def race_predictions() -> str:
+    """Predicciones de tiempo de carrera de Garmin (5K, 10K, media, maraton)."""
+    return out(gd.race_predictions())
+
+
+@mcp.tool(annotations=READ)
+def scheduled_workouts(start_date: str | None = None, end_date: str | None = None) -> str:
+    """Entrenos ya programados en Garmin (plan de Garmin Coach y calendario). Por defecto, desde hace 7 dias hasta dentro de 28."""
+    return out(gd.scheduled_workouts(start_date, end_date))
+
+
+@mcp.tool(annotations=READ)
+def training_plan() -> str:
+    """Plan de entrenamiento activo en Garmin Coach: nombre, fechas, semanas, entrenos por semana y fases."""
+    return out(gd.training_plan())
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True))
+def send_workout(name: str, date: str, steps: list[dict], description: str = "", confirm: bool = False) -> str:
+    """Crea un entreno de CARRERA estructurado en Garmin Connect y lo programa en `date` (YYYY-MM-DD, entre hoy y +60 dias);
+    se sincroniza con el reloj. Con confirm=false solo devuelve la vista previa: ensenasela al usuario y llama de nuevo con
+    confirm=true cuando el diga que si. Cada paso es un dict:
+      {"type": "warmup|run|recovery|rest|cooldown", "name": "...", "note": "...",
+       "duration_min": 10 | "distance_km": 1.0 | "distance_m": 400,        (uno de los tres)
+       "target": {"type": "hr", "min": 140, "max": 155}                       (lpm)
+              o {"type": "pace", "min": "5:10", "max": "5:30"}                (min:seg por km)
+              o {"type": "none"}}
+    Para repetir: {"repeat": 5, "steps": [ ...pasos... ]} (sin anidar). Maximo 40 pasos."""
+    from coach import garmin_push
+    w = garmin_push.workout_from_spec(name, date, steps, description)
+    if not confirm:
+        return out({"vista_previa": True, "nombre": w["workoutName"], "fecha": date, "pasos": steps,
+                    "siguiente": "Si el usuario confirma, llama de nuevo con confirm=true."})
+    try:
+        r = garmin_push.push(w, date)
+    except Exception as e:
+        raise RuntimeError(f"Garmin rechazo el entreno: {str(e)[:300]}") from e
+    return out({"enviado": True, "nombre": w["workoutName"], **r})
