@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Instalacion unica en Ubuntu/Debian (ejecutar como root desde el repo clonado en /opt/garmin-coach).
-# Sustituye cualquier servidor web anterior por Caddy (HTTPS automatico) sirviendo contentaimaker.com.
+# Sustituye cualquier servidor web anterior por Caddy (HTTPS automatico) sirviendo tu dominio.
 set -euo pipefail
-DOMAIN="${DOMAIN:-contentaimaker.com}"
+DOMAIN="${DOMAIN:?Define DOMAIN, p. ej.: DOMAIN=ejemplo.com bash deploy/setup.sh}"
 APP=/opt/garmin-coach
 cd "$APP"
 
@@ -35,7 +35,7 @@ GEMINI_API_KEY=PEGA_AQUI_TU_CLAVE
 COACH_PROVIDER=gemini
 ENV
   chmod 600 .env
-  echo ">>> Contrasena de la web generada en $APP/.env (COACH_PASSWORD). Edita ANTHROPIC_API_KEY ahi."
+  echo ">>> Contrasena de la web generada en $APP/.env (COACH_PASSWORD). Edita GEMINI_API_KEY (o ANTHROPIC_API_KEY con COACH_PROVIDER=anthropic) ahi."
 fi
 
 cat > /etc/systemd/system/garmin-coach.service <<UNIT
@@ -72,4 +72,4 @@ UNIT
 systemctl daemon-reload
 systemctl enable --now garmin-coach garmin-coach-daily.timer
 systemctl restart caddy
-echo "Listo. Falta: copiar tokens de Garmin a $APP/data/tokens y poner ANTHROPIC_API_KEY en $APP/.env"
+echo "Listo. Falta: copiar tokens de Garmin a $APP/data/tokens y poner GEMINI_API_KEY (o ANTHROPIC_API_KEY) y COACH_PUBLIC_URL en $APP/.env"

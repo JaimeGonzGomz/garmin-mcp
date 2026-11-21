@@ -12,7 +12,7 @@ from mcp.types import ToolAnnotations
 from coach import garmin_data as gd
 from coach.oauth import SCOPE, Provider
 
-PUBLIC_URL = os.getenv("COACH_PUBLIC_URL", "https://contentaimaker.com").rstrip("/")
+PUBLIC_URL = os.getenv("COACH_PUBLIC_URL", "http://localhost:8000").rstrip("/")
 HOST = PUBLIC_URL.split("://", 1)[-1]
 MAX_CHARS = 60_000
 
