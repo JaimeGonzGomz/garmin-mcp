@@ -65,14 +65,30 @@ def summarize() -> dict:
             for k, v in data.items():
                 items = v if isinstance(v, list) else [v]
                 fields = sorted({f for i in items if isinstance(i, dict) for f in i})
-                out.setdefault(k, {"n": 0, "fields": set()})
-                out[k]["n"] += len(items)
-                out[k]["fields"].update(fields)
+                o = out.setdefault(k, {"n": 0, "fields": set(), "_users": set(), "_t": [], "_recv": []})
+                o["n"] += len(items)
+                o["fields"].update(fields)
+                o["_users"].update(str(i["userId"]) for i in items if isinstance(i, dict) and "userId" in i)
+                o["_t"] += [i["startTimeInSeconds"] for i in items
+                            if isinstance(i, dict) and isinstance(i.get("startTimeInSeconds"), int)]
+                o["_recv"].append(int(p.stem.rsplit("-", 1)[-1]) / 1e9)
+    from datetime import datetime, timezone
+    day = lambda t: datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%d")
     for v in out.values():
         if isinstance(v, dict):
             v["fields"] = sorted(v["fields"])
+            v["usuarios_distintos"] = len(v.pop("_users"))
+            t, r = v.pop("_t"), v.pop("_recv")
+            v["datos_desde_hasta"] = [day(min(t)), day(max(t))] if t else None
+            v["recibido_desde_hasta"] = [day(min(r)), day(max(r))]
     return out
 
 
 if __name__ == "__main__":
-    print(json.dumps(summarize(), indent=2, ensure_ascii=False))
+    import sys
+    res = summarize()
+    if "--brief" in sys.argv:
+        for v in res.values():
+            if isinstance(v, dict):
+                v.pop("fields")
+    print(json.dumps(res, indent=2, ensure_ascii=False))
