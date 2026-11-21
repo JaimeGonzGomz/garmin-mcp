@@ -89,7 +89,8 @@ Configuración (variables de entorno en `.env`):
 - **Seguridad.** El repositorio no contiene credenciales. Mantén en privado `.env`, `data/` y tus tokens de Garmin.
   Las páginas legales (`coach/legal.py`) son borradores que escribí para mi despliegue y **no** son asesoramiento
   jurídico; haz que las revise un profesional antes de reutilizarlas.
-- **Aún no hay licencia**, así que por defecto todos los derechos están reservados. Pregunta si quieres reutilizar el código.
+- **Licencia: MIT.** Puedes usar, modificar y compartir el código libremente; la única condición es mantener el aviso
+  de copyright y dar crédito (ver `LICENSE`). Se agradece citar a Jaime González Gómez y este repositorio.
 
 ## Contacto
 

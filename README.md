@@ -85,7 +85,8 @@ Configuration (environment variables in `.env`):
 - **Security.** The repository contains no credentials. Keep `.env`, `data/` and your Garmin tokens private. The
   legal pages (`coach/legal.py`) are drafts I wrote for my own deployment and are **not** legal advice; have them
   reviewed before reusing them.
-- **No licence has been added yet**, so by default all rights are reserved. Ask if you want to reuse the code.
+- **Licence: MIT.** You can use, modify and share the code freely; the only condition is to keep the copyright
+  notice and give credit (see `LICENSE`). Credit to Jaime González Gómez / this repository is appreciated.
 
 ## Contact
 
