@@ -157,15 +157,22 @@ if ENABLE_SEND:
                   o {"type": "none"}}
         Para repetir: {"repeat": 5, "steps": [ ...pasos... ]} (sin anidar). Maximo 40 pasos."""
         from coach import garmin_push
+        from coach.db import conn
         w = garmin_push.workout_from_spec(name, date, steps, description)
         if not confirm:
             return out({"vista_previa": True, "nombre": w["workoutName"], "fecha": date, "pasos": steps,
                         "siguiente": "Si el usuario confirma, llama de nuevo con confirm=true."})
+        db = conn()
+        # Igual que el boton de la web: un entreno enviado por dia; si ya habia uno de ese dia se sustituye (no se duplica)
+        prev = db.execute("select workout_id from sent where day = ?", (date,)).fetchone()
         try:
-            r = garmin_push.push(w, date)
+            r = garmin_push.push(w, date, prev["workout_id"] if prev else None)
         except Exception as e:
             raise RuntimeError(f"Garmin rechazo el entreno: {str(e)[:300]}") from e
-        return out({"enviado": True, "nombre": w["workoutName"], **r})
+        db.execute("insert or replace into sent (day, workout_id, name) values (?, ?, ?)",
+                   (date, str(r["workout_id"]), w["workoutName"]))
+        db.commit()
+        return out({"enviado": True, "nombre": w["workoutName"], "sustituye_al_anterior_del_dia": bool(prev), **r})
 
 
 @mcp.prompt(title="Garmin vs mi recomendacion")
